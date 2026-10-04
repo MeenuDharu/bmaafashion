@@ -1,0 +1,13 @@
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
+.env
+backups/bmaafashion.zip
+backup/SpireGrocer.zip
+bmaafashion.zip
+backup/SpireGrocer.zip
+*.zip
+backup/.config/replit/
