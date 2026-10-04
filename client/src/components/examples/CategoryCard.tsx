@@ -1,5 +1,7 @@
 import CategoryCard from '../CategoryCard';
-import nftKitImage from "@assets/IMG_0204_1762416716371.jpg";
+import { safeImageImport } from "@/lib/image-utils";
+
+const nftKitImage = safeImageImport("/attached_assets/bmaafashion.jpeg");
 
 export default function CategoryCardExample() {
   return (

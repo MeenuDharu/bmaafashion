@@ -18,10 +18,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import heroImage from "@assets/IMG_0150_1762417364567_optimized.jpg";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
-import farmImage from "@assets/IMG_0251_1762416808678.jpg";
-import techImage from "@assets/IMG_0258_1762416840012.jpg";
+import { safeImageImport, handleImageError as handleImgError, PLACEHOLDER_IMAGE } from "@/lib/image-utils";
+
+// Import images with fallback support
+const heroImage = safeImageImport("/attached_assets/bmaafashion.jpeg");
+const farmImage = safeImageImport("/attached_assets/heroicimage.png");
+const techImage = safeImageImport("/attached_assets/banner1.jpeg");
 
 export default function About() {
   const aboutStructuredData = useMemo(() => [
@@ -115,6 +118,7 @@ export default function About() {
             loading="eager"
             decoding="async"
             data-testid="img-hero"
+            onError={handleImgError}
           />
         </div>
       </div>
@@ -168,6 +172,7 @@ export default function About() {
               loading="lazy"
               decoding="async"
               data-testid="img-farm"
+              onError={handleImgError}
             />
           </div>
         </div>
@@ -282,6 +287,7 @@ export default function About() {
                 loading="lazy"
                 decoding="async"
                 data-testid="img-future"
+                onError={handleImgError}
               />
             </div>
           </div>

@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import ShoppingCartSlideout from '../ShoppingCartSlideout';
 import { Button } from "@/components/ui/button";
-import nftKitImage from "@assets/IMG_0204_1762416716371.jpg";
-import dutchBucketImage from "@assets/IMG_0237_1762416768011.jpg";
+import { safeImageImport } from "@/lib/image-utils";
+
+const nftKitImage = safeImageImport("/attached_assets/bmaafashion.jpeg");
+const dutchBucketImage = safeImageImport("/attached_assets/banner1.jpeg");
 
 export default function ShoppingCartSlideoutExample() {
   const [isOpen, setIsOpen] = useState(false);

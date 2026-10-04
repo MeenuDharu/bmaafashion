@@ -18,7 +18,9 @@ import {
   FormDescription,
 } from "@/components/ui/form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import bmaaFashionLogo from "@assets/bmaafashion.jpeg";
+import { getImageUrl } from "@/lib/image-utils";
+
+const bmaaFashionLogo = getImageUrl("logo");
 
 const resetPasswordSchema = z.object({
   newPassword: z

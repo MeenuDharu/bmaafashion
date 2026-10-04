@@ -19,7 +19,9 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import bmaaFashionLogo from "@assets/bmaafashion.jpeg";
+import { getImageUrl } from "@/lib/image-utils";
+
+const bmaaFashionLogo = getImageUrl("logo");
 
 const registerSchema = z.object({
   email: z.string().email("Please enter a valid email address"),

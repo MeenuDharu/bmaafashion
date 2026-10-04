@@ -17,7 +17,9 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import bmaaFashionLogo from "@assets/bmaafashion.jpeg";
+import { getImageUrl } from "@/lib/image-utils";
+
+const bmaaFashionLogo = getImageUrl("logo");
 
 const forgotPasswordSchema = z.object({
   email: z.string().email("Please enter a valid email address"),

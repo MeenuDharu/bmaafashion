@@ -24,7 +24,9 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useWishlist } from "@/hooks/useWishlist";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
-import bmaaFashionLogo from "@assets/bmaafashion.jpeg";
+import { getImageUrl, handleImageError } from "@/lib/image-utils";
+
+const bmaaFashionLogo = getImageUrl("logo");
 
 interface HeaderProps {
   cartItemCount?: number;

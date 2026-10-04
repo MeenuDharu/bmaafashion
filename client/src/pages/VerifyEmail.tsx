@@ -6,7 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import bmaaFashionLogo from "@assets/bmaafashion.jpeg";
+import { getImageUrl } from "@/lib/image-utils";
+
+const bmaaFashionLogo = getImageUrl("logo");
 
 export default function VerifyEmail() {
   const [, setLocation] = useLocation();

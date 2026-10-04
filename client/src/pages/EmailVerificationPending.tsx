@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import EmailVerificationBanner from "@/components/EmailVerificationBanner";
-import bmaaFashionLogo from "@assets/bmaafashion.jpeg";
+import { getImageUrl } from "@/lib/image-utils";
+
+const bmaaFashionLogo = getImageUrl("logo");
 
 export default function EmailVerificationPending() {
   const [, setLocation] = useLocation();

@@ -3,7 +3,9 @@ import { ArrowRight, Sparkles, Crown, Gem, ChevronLeft, ChevronRight, Pause } fr
 import { Link } from "wouter";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { useState, useEffect, useCallback, useRef } from "react";
-import heroImage from "@assets/IMG_0150_1762417364567_optimized.jpg";
+import { getImageUrl } from "@/lib/image-utils";
+
+const heroImage = getImageUrl("heroImage");
 
 const SESSION_KEY = "hero-failed-urls";
 
