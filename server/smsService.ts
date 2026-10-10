@@ -1,3 +1,4 @@
+// @ts-expect-error Twilio's package export map does not expose the bundled declaration under bundler resolution.
 import twilio from 'twilio';
 import { parsePhoneNumber, isValidPhoneNumber } from 'libphonenumber-js';
 import crypto from 'crypto';

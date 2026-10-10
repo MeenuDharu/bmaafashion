@@ -103,7 +103,7 @@ export default function HeroSection({ onExploreProducts }: HeroSectionProps) {
       const next = new Set(prev);
       next.add(src);
       try {
-        sessionStorage.setItem(SESSION_KEY, JSON.stringify([...next]));
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(Array.from(next)));
       } catch {
         // sessionStorage may be unavailable; ignore silently
       }

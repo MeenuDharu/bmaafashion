@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, ShoppingCart, Check, AlertCircle, MapPin, User, Mail, Phone } from "lucide-react";
+import { ArrowLeft, ShoppingCart, Check, AlertCircle, MapPin, User, Mail, Phone, Tag } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { useCart } from "@/context/CartContext";
 import { useAuth, useAuthenticatedFetch } from "@/context/AuthContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -44,13 +45,22 @@ function CheckoutContent() {
   const { items, getTotalPrice, clearCart, isMigrating, isLoading } = useCart();
   const { toast } = useToast();
   const { user } = useAuth();
+  const { orderSettings, policies, promotions } = useSiteSettings();
   const authenticatedFetch = useAuthenticatedFetch();
   const [, setLocation] = useLocation();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [promoCode, setPromoCode] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<any | null>(null);
+  const [promoError, setPromoError] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"razorpay" | "cod">("razorpay");
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [orderId, setOrderId] = useState<string>("");
   const [selectedAddress, setSelectedAddress] = useState<UserAddress | null>(null);
   const [guestAddress, setGuestAddress] = useState<GuestAddressData | null>(null);
+  const [giftCardCode, setGiftCardCode] = useState("");
+  const [giftCardBalance, setGiftCardBalance] = useState(0);
+  const [loyaltyBalance, setLoyaltyBalance] = useState(0);
+  const [loyaltyPointsRedeemed, setLoyaltyPointsRedeemed] = useState(0);
   
   // Guest checkout states
   const [checkoutMode, setCheckoutMode] = useState<'guest' | 'signin' | 'authenticated'>('guest');
@@ -68,6 +78,11 @@ function CheckoutContent() {
     } else {
       setCheckoutMode('guest');
     }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) { setLoyaltyBalance(0); setLoyaltyPointsRedeemed(0); return; }
+    fetch('/api/loyalty', { headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` } }).then(r => r.ok ? r.json() : null).then(data => setLoyaltyBalance(Number(data?.account?.pointsBalance || 0))).catch(() => setLoyaltyBalance(0));
   }, [user]);
 
   const form = useForm<CheckoutFormValues>({
@@ -147,6 +162,96 @@ function CheckoutContent() {
     });
   };
 
+  const calculatePromotion = (code: string) => {
+    const normalized = code.trim().toUpperCase();
+    if (!normalized) return null;
+    const found = (promotions || []).find((p: any) => p?.active && p?.code?.trim?.().toUpperCase() === normalized);
+    if (!found) return null;
+    if (found.expiry) {
+      const expiry = new Date(found.expiry).getTime();
+      if (!Number.isNaN(expiry) && expiry < Date.now()) return null;
+    }
+    return found;
+  };
+
+  const applyGiftCard = async () => {
+    if (!giftCardCode.trim()) return;
+    try {
+      const r = await fetch('/api/gift-cards/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: giftCardCode.trim().toUpperCase() }) });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Invalid gift card');
+      setGiftCardCode(data.code); setGiftCardBalance(Number(data.remainingAmount || 0));
+    } catch (e) { setGiftCardBalance(0); setPromoError(e instanceof Error ? e.message : 'Invalid gift card'); }
+  };
+
+  const applyPromoCode = async () => {
+    const normalized = promoCode.trim().toUpperCase();
+    if (!normalized) return;
+    try {
+      const response = await fetch('/api/coupons/validate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...(localStorage.getItem('auth_token') ? { Authorization: `Bearer ${localStorage.getItem('auth_token')}` } : {}) },
+        body: JSON.stringify({ code: normalized, subtotal, productIds: items.map(i => i.product.id), categories: items.map(i => i.product.category).filter(Boolean) })
+      });
+      if (response.ok) {
+        const result = await response.json();
+        setAppliedPromo({ ...result, discountType: result.discountType, discountValue: result.discountValue });
+        setPromoError('');
+        return;
+      }
+    } catch {}
+    const found = calculatePromotion(normalized);
+    if (!found) { setAppliedPromo(null); setPromoError('Invalid or expired promotion code.'); return; }
+    setAppliedPromo(found); setPromoError('');
+  };
+
+  const [shippingQuote, setShippingQuote] = useState<any>(null);
+
+
+
+  const subtotal = getTotalPrice();
+  const inferredPromoValue = appliedPromo?.discountValue || Number((String(appliedPromo?.message || "").match(/(\d+(?:\.\d+)?)\s*%/) || [])[1] || 0);
+  const discount = appliedPromo
+    ? appliedPromo.discountType === "fixed"
+      ? Math.min(subtotal, Math.max(0, Number(appliedPromo.discountValue || 0)))
+      : Math.min(subtotal, subtotal * Math.min(100, Math.max(0, inferredPromoValue)) / 100)
+    : 0;
+  const loyaltyDiscount = user ? Math.min(Math.floor(loyaltyPointsRedeemed / 10), Math.max(0, subtotal - discount)) : 0;
+  const taxableSubtotal = Math.max(0, subtotal - discount - loyaltyDiscount);
+  const freeThreshold = Math.max(0, Number(policies?.shipping?.freeThreshold ?? 0));
+  const configuredShipping = Math.max(0, Number(policies?.shipping?.shippingCost ?? 0));
+  const shipping = shippingQuote ? Number(shippingQuote.shipping || 0) : (freeThreshold > 0 && taxableSubtotal >= freeThreshold ? 0 : configuredShipping);
+  const taxRate = Math.max(0, Number(policies?.gst?.rate ?? 0));
+  const tax = taxableSubtotal * taxRate / 100;
+  const giftCardApplied = Math.min(giftCardBalance, taxableSubtotal + shipping + tax);
+  const total = Math.max(0, taxableSubtotal + shipping + tax - giftCardApplied);
+
+  useEffect(() => {
+    const address = selectedAddress || guestAddress;
+    if (!address?.country) { setShippingQuote(null); return; }
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch('/api/shipping/quote', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            country: address.country, state: address.state, subtotal: taxableSubtotal,
+            items: items.map(item => ({ productId: item.productId, quantity: item.quantity }))
+          })
+        });
+        setShippingQuote(response.ok ? await response.json() : null);
+      } catch { setShippingQuote(null); }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [selectedAddress, guestAddress, taxableSubtotal, items]);
+
+  useEffect(() => {
+    if (!items.length) return;
+    const sessionId = localStorage.getItem('bmaa_session_id') || crypto.randomUUID();
+    localStorage.setItem('bmaa_session_id', sessionId);
+    const timer = setTimeout(() => fetch('/api/abandoned-cart/track', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId }, body: JSON.stringify({ sessionId, customerEmail: user?.email || form.getValues('customerEmail') || undefined, customerName: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : undefined, items: items.map(i => ({ productId: i.product.id, name: i.product.name, quantity: i.quantity, size: i.size, color: i.color })), cartTotal: subtotal }) }).catch(() => undefined), 1500);
+    return () => clearTimeout(timer);
+  }, [items, user, form, subtotal]);
+
+
   const onSubmit = async (values: CheckoutFormValues) => {
     // Validate that an address is selected
     if (!selectedAddress && !guestAddress) {
@@ -188,10 +293,13 @@ function CheckoutContent() {
       
       const orderItems = items.map(item => ({
         productId: item.productId,
+        variantId: item.variantId || null,
         productName: item.product.name,
-        productPrice: item.product.price,
+        productPrice: item.variant?.price ?? item.product.price,
         quantity: item.quantity,
-        totalPrice: (parseFloat(item.product.price) * item.quantity).toString(),
+        size: item.size || null,
+        color: item.color || null,
+        totalPrice: (parseFloat(item.variant?.price ?? item.product.price) * item.quantity).toString(),
       }));
 
       // Create order in our database - use different endpoints for guest vs authenticated users
@@ -201,11 +309,12 @@ function CheckoutContent() {
         // Authenticated user flow
         const orderResponse = await authenticatedFetch('/api/orders', {
           method: 'POST',
-          body: JSON.stringify({ ...orderData, items: orderItems }),
+          body: JSON.stringify({ ...orderData, items: orderItems, promoCode: appliedPromo?.code || promoCode || null, paymentMethod }),
         });
 
         if (!orderResponse.ok) {
-          throw new Error('Failed to create order');
+          const errorData = await orderResponse.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Failed to create order');
         }
 
         order = await orderResponse.json();
@@ -219,9 +328,14 @@ function CheckoutContent() {
           billingAddress: shippingAddressData, // Using same address for now
           useSameAddress: true,
           orderNotes: values.orderNotes,
+          promoCode: appliedPromo?.code || promoCode || undefined,
+          paymentMethod,
           items: orderItems.map(item => ({
             productId: item.productId,
+            variantId: item.variantId || null,
             quantity: item.quantity,
+            size: item.size,
+            color: item.color,
             // productName, productPrice, totalPrice calculated server-side for security
           })),
           // subtotal, shippingCost, taxAmount, total calculated server-side for security
@@ -251,6 +365,14 @@ function CheckoutContent() {
         }
 
         order = await orderResponse.json();
+      }
+
+      if (paymentMethod === "cod") {
+        setOrderId(order.id);
+        setOrderPlaced(true);
+        clearCart();
+        toast({ title: "Order Placed Successfully!", description: `Your Order #${order.id.slice(-8)} is confirmed for Cash on Delivery.` });
+        return;
       }
 
       // Load Razorpay script
@@ -406,18 +528,13 @@ function CheckoutContent() {
       console.error('Error during checkout:', error);
       toast({
         title: "Checkout Failed",
-        description: "There was an error processing your order. Please try again.",
+        description: error instanceof Error ? error.message : "There was an error processing your order. Please try again.",
         variant: "destructive",
       });
       setIsSubmitting(false);
     }
   };
 
-  // Calculate totals
-  const subtotal = getTotalPrice();
-  const shipping = 0; // Free shipping for all orders
-  const tax = 0; // GST set to 0% for all orders
-  const total = subtotal + shipping + tax;
 
   // Show loading state while cart is loading or migrating
   if ((isMigrating || isLoading) && items.length === 0) {
@@ -529,12 +646,19 @@ function CheckoutContent() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <h4 className="font-medium text-sm line-clamp-2">{item.product.name}</h4>
+                        {(item.size || item.color) && (
+                          <p className="text-xs text-muted-foreground">
+                            {item.size && `Size: ${item.size}`}
+                            {item.size && item.color && ' • '}
+                            {item.color && `Color: ${item.color}`}
+                          </p>
+                        )}
                         <p className="text-xs text-muted-foreground">
-                          Qty: {item.quantity} × ₹{parseFloat(item.product.price).toLocaleString()} {item.product.unit || 'per unit'}
+                          Qty: {item.quantity} × ₹{parseFloat(item.variant?.price ?? item.product.price).toLocaleString()} {item.product.unit || 'per unit'}
                         </p>
                       </div>
                       <div className="text-sm font-medium">
-                        ₹{(parseFloat(item.product.price) * item.quantity).toLocaleString()}
+                        ₹{(parseFloat(item.variant?.price ?? item.product.price) * item.quantity).toLocaleString()}
                       </div>
                     </div>
                   ))}
@@ -542,19 +666,47 @@ function CheckoutContent() {
 
                 <Separator />
 
+                {/* Promotion Code */}
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <Input value={promoCode} onChange={(e) => { setPromoCode(e.target.value.toUpperCase()); setPromoError(""); }} placeholder="Promotion code" />
+                    <Button type="button" variant="outline" onClick={applyPromoCode}><Tag className="h-4 w-4 mr-1" />Apply</Button>
+                  </div>
+                  {promoError && <p className="text-xs text-destructive">{promoError}</p>}
+                  {appliedPromo && <p className="text-xs text-green-600">Code {appliedPromo.code} applied successfully.</p>}
+                </div>
+
+                <div className="space-y-3 border rounded-lg p-3">
+                  <div className="flex gap-2"><Input value={giftCardCode} onChange={e=>setGiftCardCode(e.target.value.toUpperCase())} placeholder="Gift card code"/><Button type="button" variant="outline" onClick={applyGiftCard}>Apply Gift Card</Button></div>
+                  {giftCardApplied > 0 && <p className="text-xs text-green-600">Gift card applied: ₹{giftCardApplied.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</p>}
+                  {user && loyaltyBalance > 0 && <div className="flex items-center justify-between gap-3 text-sm"><span>Rewards: {loyaltyBalance} points available (100 points = ₹10)</span><Input className="w-28" type="number" min="0" max={loyaltyBalance} step="10" value={loyaltyPointsRedeemed} onChange={e=>setLoyaltyPointsRedeemed(Math.min(loyaltyBalance, Math.max(0, Number(e.target.value)||0)))} /></div>}
+                </div>
+
+                {/* Payment Method */}
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Payment Method</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <Button type="button" variant={paymentMethod === "razorpay" ? "default" : "outline"} onClick={() => setPaymentMethod("razorpay")}>Online Payment</Button>
+                    {orderSettings?.codEnabled && <Button type="button" variant={paymentMethod === "cod" ? "default" : "outline"} onClick={() => setPaymentMethod("cod")}>Cash on Delivery</Button>}
+                  </div>
+                </div>
+
                 {/* Price Breakdown */}
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span>Subtotal</span>
                     <span data-testid="text-subtotal">₹{subtotal.toLocaleString()}</span>
                   </div>
+                  {discount > 0 && <div className="flex justify-between text-green-600"><span>Discount {appliedPromo?.code ? `(${appliedPromo.code})` : ""}</span><span>-₹{discount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
+                  {loyaltyDiscount > 0 && <div className="flex justify-between text-green-600"><span>Rewards</span><span>-₹{loyaltyDiscount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
+                  {giftCardApplied > 0 && <div className="flex justify-between text-green-600"><span>Gift card</span><span>-₹{giftCardApplied.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
                   <div className="flex justify-between">
                     <span>Shipping</span>
-                    <span className="text-amber-600" data-testid="text-shipping">Free</span>
+                    <span className={shipping === 0 ? "text-amber-600" : ""} data-testid="text-shipping">{shipping === 0 ? "Free" : `₹${shipping.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>GST (0%)</span>
-                    <span data-testid="text-tax">₹{tax.toLocaleString()}</span>
+                    <span>GST ({taxRate}%)</span>
+                    <span data-testid="text-tax">₹{tax.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span>
                   </div>
                   <Separator />
                   <div className="flex justify-between font-bold text-base">
@@ -564,6 +716,8 @@ function CheckoutContent() {
                 </div>
               </CardContent>
             </Card>
+
+            {orderSettings?.deliveryMessage && <p className="text-sm text-muted-foreground">{orderSettings.deliveryMessage}</p>}
 
             {/* Security Notice */}
             <Card>
@@ -781,12 +935,11 @@ function CheckoutContent() {
               onGuestAddressChange={setGuestAddress}
               allowGuestCheckout={!user}
             />
-
             {/* Payment Section */}
             <Card>
               <CardHeader>
                 <CardTitle>Payment</CardTitle>
-                <CardDescription>Complete your order with secure payment</CardDescription>
+                <CardDescription>{orderSettings?.deliveryMessage || "Complete your order with secure payment"}</CardDescription>
               </CardHeader>
               <CardContent>
                 <Button 

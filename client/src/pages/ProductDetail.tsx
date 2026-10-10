@@ -12,9 +12,10 @@ import { useCart } from "@/context/CartContext";
 import { useWishlist } from "@/hooks/useWishlist";
 import { ProductReviews } from "@/components/ProductReviews";
 import ProductImageGallery from "@/components/ProductImageGallery";
-import { Product } from "@shared/schema";
+import { Product, ProductVariant } from "@shared/schema";
 import { useSEO } from "@/hooks/use-seo";
 import { ORGANIZATION_DATA, generateBreadcrumbs, generateProductSchema } from "@/lib/structured-data-constants";
+import { isSizeRequired, parseSizes, getDefaultSizes, validateSizeSelection } from "@/lib/size-utils";
 
 interface ProductDetailProps {
   onAddToCart: (productId: string, quantity?: number) => void;
@@ -29,10 +30,10 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
   const { isInWishlist, toggleWishlist, isLoading: isWishlistLoading } = useWishlist();
   const [quantity, setQuantity] = useState(1);
   const [selectedSize, setSelectedSize] = useState<string>("");
+  const [selectedColor, setSelectedColor] = useState<string>("");
   const [isAddingToCart, setIsAddingToCart] = useState(false);
-  
-  // Available sizes - you can customize this based on your product data
-  const availableSizes = ["S", "M", "L", "XL", "XXL"];
+  const [sizeError, setSizeError] = useState<string>("");
+  const [colorError, setColorError] = useState<string>("");
   
   // Detect where the user came from to provide proper back navigation
   const sourceFrom = sessionStorage.getItem('productListSource');
@@ -51,7 +52,41 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
     enabled: !!productId
   });
 
+  const { data: variants = [] } = useQuery<ProductVariant[]>({
+    queryKey: ['/api/products', productId, 'variants'],
+    queryFn: async () => {
+      if (!productId) return [];
+      const response = await fetch(`/api/products/${productId}/variants`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+    enabled: !!productId
+  });
+
+  const selectedVariant = useMemo(() =>
+    variants.find(v => (v.size ?? '') === selectedSize && (v.color ?? '') === selectedColor && v.isActive !== false),
+    [variants, selectedSize, selectedColor]
+  );
+
+  // Track recently viewed products without blocking page rendering.
+  useEffect(() => {
+    if (!productId) return;
+    let sessionId = localStorage.getItem("bmaa_session_id");
+    if (!sessionId) { sessionId = crypto.randomUUID(); localStorage.setItem("bmaa_session_id", sessionId); }
+    fetch(`/api/recently-viewed/${productId}`, { method: "POST", headers: { "Content-Type": "application/json", "x-session-id": sessionId }, body: JSON.stringify({ sessionId }) }).catch(() => undefined);
+  }, [productId]);
+
   // Fetch related products (same category)
+  const { data: recentlyViewed = [] } = useQuery({
+    queryKey: ['/api/recently-viewed'],
+    queryFn: async () => {
+      const sessionId = localStorage.getItem('bmaa_session_id') || '';
+      const response = await fetch('/api/recently-viewed', { headers: { 'x-session-id': sessionId } });
+      if (!response.ok) return [];
+      return response.json() as Promise<Product[]>;
+    },
+  });
+
   const { data: relatedProducts = [] } = useQuery({
     queryKey: ['/api/products', { category: product?.category }],
     queryFn: async () => {
@@ -87,6 +122,15 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
     ];
   }, [product]);
 
+  const addToCompare = async () => {
+    if (!productId) return;
+    let sessionId = localStorage.getItem("bmaa_session_id");
+    if (!sessionId) { sessionId = crypto.randomUUID(); localStorage.setItem("bmaa_session_id", sessionId); }
+    const response = await fetch(`/api/compare/${productId}`, { method: "POST", headers: { "Content-Type": "application/json", "x-session-id": sessionId }, body: JSON.stringify({ sessionId }) });
+    const data = await response.json();
+    toast({ title: response.ok ? "Added to comparison" : "Comparison limit", description: response.ok ? "You can compare up to 4 products." : data.error });
+  };
+
   const productImage = product?.images && product.images.length > 0 ? product.images[0] : null;
 
   useSEO({
@@ -106,6 +150,39 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
     structuredData: productStructuredData || undefined,
   });
 
+  // Get available sizes from product or use defaults
+  const availableSizes = useMemo(() => {
+    if (!product) return [];
+    
+    // Check if this product category requires size
+    const requiresSize = isSizeRequired(product.category);
+    if (!requiresSize) return [];
+    
+    // Parse sizes from product.size field
+    const variantSizes = Array.from(new Set(variants.filter(v => v.size && v.isActive !== false).map(v => v.size!)));
+    if (variantSizes.length > 0) return variantSizes;
+    const productSizes = parseSizes(product.size);
+    return productSizes.length > 0 ? productSizes : getDefaultSizes();
+  }, [product, variants]);
+
+  // Check if size selection is required for this product
+  const sizeRequired = useMemo(() => {
+    return product ? isSizeRequired(product.category) : false;
+  }, [product]);
+  const availableColors = useMemo(() => {
+    const variantColors = Array.from(new Set(variants.filter(v => v.color && v.isActive !== false).map(v => v.color!)));
+    if (variantColors.length > 0) return variantColors;
+    return product?.colors?.split(",").map(color => color.trim()).filter(Boolean) ?? [];
+  }, [product?.colors, variants]);
+
+  // Reset selected size when product changes
+  useEffect(() => {
+    setSelectedSize("");
+    setSelectedColor("");
+    setSizeError("");
+    setColorError("");
+  }, [productId]);
+
   // Calculate stock status
   const getStockStatus = () => {
     if (!product) return { status: 'out_of_stock', label: 'Out of Stock', color: 'destructive' as const };
@@ -122,8 +199,36 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
   const handleAddToCart = async () => {
     if (!product) return;
     
+    // Validate size selection for products that require it
+    const sizeValidation = validateSizeSelection(product, selectedSize);
+    if (!sizeValidation.valid) {
+      setSizeError(sizeValidation.error || "Please select a size");
+      toast({
+        title: "Size Required",
+        description: sizeValidation.error || "Please select a size before adding to cart",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (availableColors.length > 0 && !selectedColor) {
+      setColorError("Please select a color before adding to cart");
+      toast({
+        title: "Color Required",
+        description: "Please select a color before adding to cart",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Clear any previous size errors
+    setSizeError("");
+    
+    // Variant stock is authoritative when a variant is selected.
+    const selectedStock = selectedVariant?.stockQuantity ?? product.inStock;
+
     // Enhanced stock validation
-    if (product.inStock === 0) {
+    if (selectedStock === 0) {
       toast({
         title: "Out of Stock",
         description: "This product is currently out of stock",
@@ -132,30 +237,32 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
       return;
     }
     
-    if (quantity > product.inStock) {
+    if (quantity > selectedStock) {
       toast({
         title: "Insufficient Stock",
-        description: `Only ${product.inStock} units available`,
+        description: `Only ${selectedStock} units available`,
         variant: "destructive",
       });
       return;
     }
     
     // Get current quantity in cart before adding
-    const currentCartItem = items.find(item => item.productId === product.id);
+    const currentCartItem = items.find(item =>
+      item.productId === product.id && item.variantId === (selectedVariant?.id || undefined) && item.size === (selectedSize || null) && item.color === (selectedColor || null)
+    );
     const currentQuantity = currentCartItem?.quantity || 0;
     const newTotal = currentQuantity + quantity;
     
     setIsAddingToCart(true);
     try {
       // Use cart context directly with size parameter
-      const success = await addToCart(product, quantity, selectedSize || undefined);
+      const success = await addToCart(product, quantity, selectedSize || undefined, selectedColor || undefined, selectedVariant?.id);
       
       if (success) {
         // Show enhanced message with current and new total
         const message = currentQuantity > 0
-          ? `${quantity} added (${newTotal} total in cart)${selectedSize ? ` - Size: ${selectedSize}` : ''}`
-          : `${quantity} x ${product.name}${selectedSize ? ` (Size: ${selectedSize})` : ''} added to your cart`;
+          ? `${quantity} added (${newTotal} total in cart)${selectedSize ? ` - Size: ${selectedSize}` : ''}${selectedColor ? ` - Color: ${selectedColor}` : ''}`
+          : `${quantity} x ${product.name}${selectedSize ? ` (Size: ${selectedSize})` : ''}${selectedColor ? ` (Color: ${selectedColor})` : ''} added to your cart`;
         
         toast({
           title: "Added to Cart",
@@ -211,9 +318,9 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
     );
   }
 
-  const isInStock = product.inStock > 0;
+  const isInStock = (selectedVariant?.stockQuantity ?? product.inStock) > 0;
   const stockInfo = getStockStatus();
-  const formattedPrice = parseFloat(product.price).toLocaleString();
+  const formattedPrice = parseFloat(selectedVariant?.price ?? product.price).toLocaleString();
 
   return (
     <div className="min-h-screen bg-background">
@@ -368,18 +475,27 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
 
             {/* Quantity and Add to Cart */}
             <div className="space-y-4">
-              {/* Size Selector */}
-              {isInStock && (
+              {/* Size Selector - Only show if product has sizes available */}
+              {isInStock && availableSizes.length > 0 && (
                 <div className="space-y-2">
-                  <label htmlFor="size" className="font-medium">Size (Optional):</label>
+                  <label htmlFor="size" className="font-medium">
+                    Size {sizeRequired && <span className="text-destructive">*</span>}
+                    {!sizeRequired && <span className="text-muted-foreground text-sm">(Optional)</span>}:
+                  </label>
                   <div className="flex flex-wrap gap-2">
                     {availableSizes.map((size) => (
                       <Button
                         key={size}
                         variant={selectedSize === size ? "default" : "outline"}
                         size="sm"
-                        onClick={() => setSelectedSize(size)}
-                        className="min-w-[3rem]"
+                        onClick={() => {
+                          setSelectedSize(size);
+                          setSizeError(""); // Clear error when size is selected
+                        }}
+                        className={`min-w-[3rem] ${
+                          sizeError && !selectedSize ? 'border-destructive' : ''
+                        }`}
+                        data-testid={`button-size-${size}`}
                       >
                         {size}
                       </Button>
@@ -390,11 +506,48 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
                         size="sm"
                         onClick={() => setSelectedSize("")}
                         className="text-muted-foreground"
+                        data-testid="button-clear-size"
                       >
                         Clear
                       </Button>
                     )}
                   </div>
+                  {sizeError && (
+                    <p className="text-sm text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {sizeError}
+                    </p>
+                  )}
+                  {sizeRequired && !sizeError && (
+                    <p className="text-xs text-muted-foreground">
+                      Please select a size before adding to cart
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {isInStock && availableColors.length > 0 && (
+                <div className="space-y-2">
+                  <label className="font-medium">Color <span className="text-destructive">*</span></label>
+                  <div className="flex flex-wrap gap-2">
+                    {availableColors.map((color) => (
+                      <Button
+                        key={color}
+                        type="button"
+                        variant={selectedColor === color ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setSelectedColor(color);
+                          setColorError("");
+                        }}
+                        aria-pressed={selectedColor === color}
+                        data-testid={`button-color-${color.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                      >
+                        {color}
+                      </Button>
+                    ))}
+                  </div>
+                  {colorError && <p className="text-sm text-destructive">{colorError}</p>}
                 </div>
               )}
               
@@ -450,6 +603,7 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
                   }
                 </Button>
                 
+                <Button type="button" size="lg" variant="outline" onClick={addToCompare}>Compare</Button>
                 {user && (
                   <Button
                     size="lg"
@@ -601,6 +755,21 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
             currentUserRole={user?.role}
           />
         </div>
+
+        {/* Recently Viewed Products */}
+        {recentlyViewed.length > 1 && (
+          <div className="mt-16">
+            <h2 className="text-2xl font-bold mb-8">Recently Viewed</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {recentlyViewed.filter((p) => p.id !== productId).slice(0, 4).map((recent) => (
+                <Link key={recent.id} href={`/products/${recent.id}`} className="group border rounded-lg overflow-hidden">
+                  <img src={recent.images?.[0] || '/placeholder-image.jpg'} alt={recent.name} className="w-full aspect-square object-cover" />
+                  <div className="p-3"><p className="font-medium line-clamp-2">{recent.name}</p><p className="text-sm font-semibold mt-1">₹{parseFloat(recent.price).toLocaleString()}</p></div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Related Products */}
         {relatedProducts.length > 0 && (

@@ -53,8 +53,15 @@ import AdminSettings from "@/pages/admin/AdminSettings";
 import GuestOrderLookup from "@/pages/GuestOrderLookup";
 import OrderAccess from "@/pages/OrderAccess";
 import NotFound from "@/pages/not-found";
+import Support from "@/pages/Support";
+import CompareProducts from "@/pages/CompareProducts";
+import Loyalty from "@/pages/Loyalty";
+import Referrals from "@/pages/Referrals";
+import GiftCards from "@/pages/GiftCards";
+import AdminCommerceFeatures from "@/pages/admin/AdminCommerceFeatures";
 import { AuthProvider } from "@/context/AuthContext";
 import AdminRoute from "@/components/AdminRoute";
+import MobileBottomNav from "@/components/MobileBottomNav";
 
 // ── Storefront Extras: maintenance, cookie consent, popup, tracking ──
 function StorefrontExtras() {
@@ -244,6 +251,9 @@ function AppRoutes() {
           <Route path="/admin/settings">
             <AdminRoute><AdminSettings /></AdminRoute>
           </Route>
+          <Route path="/admin/commerce">
+            <AdminRoute><AdminCommerceFeatures /></AdminRoute>
+          </Route>
           <Route component={NotFound} />
         </Switch>
       </AdminLayout>
@@ -315,12 +325,7 @@ function MainApp() {
       <main className="flex-1">
         <Switch>
           <Route path="/">
-            <Home 
-              onAddToCart={handleAddToCart}
-              onViewProductDetails={handleViewProductDetails}
-              onNavigateToProducts={handleNavigateToProducts}
-              onNavigateToCategory={handleNavigateToCategory}
-            />
+            <Home />
           </Route>
           <Route path="/products">
             <Products 
@@ -365,6 +370,21 @@ function MainApp() {
           </Route>
           <Route path="/wishlist">
             <Wishlist />
+          </Route>
+          <Route path="/support">
+            <Support />
+          </Route>
+          <Route path="/compare">
+            <CompareProducts />
+          </Route>
+          <Route path="/loyalty">
+            <Loyalty />
+          </Route>
+          <Route path="/referrals">
+            <Referrals />
+          </Route>
+          <Route path="/gift-cards">
+            <GiftCards />
           </Route>
           <Route path="/orders">
             <OrderHistory />
@@ -416,6 +436,7 @@ function MainApp() {
       </main>
 
       <Footer />
+      <MobileBottomNav cartItemCount={getTotalItems()} onCartOpen={openCart} />
       
       <ShoppingCartSlideout
         isOpen={isCartOpen}

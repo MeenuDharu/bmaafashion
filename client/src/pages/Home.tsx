@@ -11,6 +11,13 @@ import {
   ChevronLeft,
   Star,
   Quote,
+  ShieldCheck,
+  Truck,
+  Leaf,
+  RotateCcw,
+  BadgeCheck,
+  Package,
+  Lock,
 } from "lucide-react";
 import { SiWhatsapp } from "react-icons/si";
 
@@ -46,8 +53,30 @@ const customerReviews = [
   }
 ];
 
+function CountdownBanner({ settings }: { settings: any }) {
+  const [remaining, setRemaining] = useState(0);
+  useEffect(() => {
+    const tick = () => setRemaining(Math.max(0, new Date(settings.endsAt).getTime() - Date.now()));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [settings.endsAt]);
+  if (!remaining) return null;
+  const total = Math.floor(remaining / 1000);
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return <div className="px-4 py-3 text-center font-semibold" style={{ backgroundColor: settings.bgColor || '#dc2626', color: settings.textColor || '#fff' }}>
+    {settings.message || 'Sale ends in:'} <span className="ml-2 tabular-nums">{days}d {String(hours).padStart(2,'0')}:{String(minutes).padStart(2,'0')}:{String(seconds).padStart(2,'0')}</span>
+  </div>;
+}
+
 export default function Home() {
-  const { whatsappWidget } = useSiteSettings();
+  const {
+    whatsappWidget, storeName, storeTagline, heroImages, heroImageDurations, heroSlideDuration,
+    featuredCategories, customBanners, promotions, countdownTimer, trustBadges, homepageSections,
+  } = useSiteSettings();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [currentReview, setCurrentReview] = useState(0);
 
@@ -60,7 +89,7 @@ export default function Home() {
 
   useSEO({
     title: "Premium Women's Ethnic Wear | Kurtis, Sarees, Co-ord Sets",
-    description: "Shop premium women's ethnic wear collection. Explore kurtis, cotton sarees, co-ord sets, maxi dresses, traditional kurti sets, plus size collection and more.",
+    description: storeTagline || "Shop premium women's ethnic wear collection. Explore kurtis, cotton sarees, co-ord sets, maxi dresses, traditional kurti sets, plus size collection and more.",
     ogTitle: "Premium Women's Ethnic Wear Collection",
     ogDescription: "Discover beautiful ethnic wear for every occasion. Quality kurtis, sarees, and traditional outfits.",
     ogImage: "/api/images/banner1.jpeg",
@@ -89,32 +118,43 @@ export default function Home() {
     },
   });
 
-  // Hero slides from products
+  // Hero slides: use Admin Settings images when configured; otherwise fall back to products.
   const heroSlides = useMemo(() => {
+    if (heroImages.length > 0) {
+      return heroImages.map((image, index) => ({
+        image,
+        title: storeName || "New Collection",
+        category: storeTagline || "Discover our latest collection",
+        duration: heroImageDurations[index] ?? heroSlideDuration,
+      }));
+    }
     if (products.length > 0) {
       const productsWithImages = products.filter((p: any) => p.images && p.images.length > 0);
       if (productsWithImages.length >= 3) {
         return productsWithImages.slice(0, 3).map((p: any) => ({
           image: p.images[0],
           title: p.name,
-          category: p.mainCategory
+          category: p.mainCategory,
+          duration: heroSlideDuration,
         }));
       }
     }
     return [
-      { image: "/api/images/banner1.jpeg", title: "New Collection", category: "Ethnic Wear" },
-      { image: "/api/images/banner2.jpeg", title: "Trending Now", category: "Fashion" },
-      { image: "/api/images/banner3.jpeg", title: "Best Sellers", category: "Popular" }
+      { image: "/api/images/banner1.jpeg", title: "New Collection", category: "Ethnic Wear", duration: heroSlideDuration },
+      { image: "/api/images/banner2.jpeg", title: "Trending Now", category: "Fashion", duration: heroSlideDuration },
+      { image: "/api/images/banner3.jpeg", title: "Best Sellers", category: "Popular", duration: heroSlideDuration }
     ];
-  }, [products]);
+  }, [products, heroImages, heroImageDurations, heroSlideDuration, storeName, storeTagline]);
 
-  // Auto-scroll hero
+  // Auto-scroll hero using per-slide duration from Admin Settings.
   useEffect(() => {
-    const timer = setInterval(() => {
+    if (!heroSlides.length) return;
+    const duration = Math.max(1, Number(heroSlides[currentSlide]?.duration ?? heroSlideDuration ?? 5)) * 1000;
+    const timer = setTimeout(() => {
       setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [heroSlides.length]);
+    }, duration);
+    return () => clearTimeout(timer);
+  }, [heroSlides, currentSlide, heroSlideDuration]);
 
   // Auto-scroll reviews
   useEffect(() => {
@@ -126,7 +166,8 @@ export default function Home() {
 
   // Categories with images and counts
   const categories = useMemo(() => {
-    return categoriesData.map((cat: any) => {
+    const configured = new Set(featuredCategories || []);
+    const mapped = categoriesData.map((cat: any) => {
       const categoryProducts = products.filter((p: any) => p.mainCategory === cat.mainCategory);
       const categoryImage = cat.imageUrl || (categoryProducts.length > 0 && categoryProducts[0].images?.[0]) || "/api/placeholder.jpg";
       
@@ -137,15 +178,38 @@ export default function Home() {
         productCount: categoryProducts.length
       };
     });
-  }, [categoriesData, products]);
+    if (!configured.size) return mapped;
+    return mapped.filter((cat: any) => configured.has(cat.id) || configured.has(cat.name));
+  }, [categoriesData, products, featuredCategories]);
 
   // Get all products for display
   const allProducts = useMemo(() => {
     return products.slice(0, 12);
   }, [products]);
 
+  const activePromotions = (promotions || []).filter((p: any) => {
+    if (!p.active) return false;
+    if (!p.expiry) return true;
+    const expiry = new Date(p.expiry).getTime();
+    return Number.isNaN(expiry) || expiry >= Date.now();
+  });
+
+  const badgeIcons: Record<string, any> = { ShieldCheck, Truck, Leaf, RotateCcw, Star, BadgeCheck, Package, Lock };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-white via-gray-50 to-white">
+      {activePromotions.length > 0 && (
+        <div className="w-full space-y-1">
+          {activePromotions.map((promo: any) => (
+            <div key={promo.id} className="px-4 py-2 text-center text-sm font-medium" style={{ backgroundColor: promo.bgColor || '#fef3c7', color: promo.textColor || '#92400e' }}>
+              {promo.message}{promo.code ? <span className="ml-2 font-bold">Use code: {promo.code}</span> : null}
+            </div>
+          ))}
+        </div>
+      )}
+      {countdownTimer?.enabled && countdownTimer?.endsAt && new Date(countdownTimer.endsAt).getTime() > Date.now() && (
+        <CountdownBanner settings={countdownTimer} />
+      )}
       {/* Premium Hero Section */}
       <section className="relative w-full h-[500px] md:h-[650px] lg:h-[750px] overflow-hidden">
         {heroSlides.map((slide: any, index: number) => (
@@ -259,6 +323,7 @@ export default function Home() {
         )}
       </section>
 
+      {homepageSections?.showFeaturedProducts !== false && (<>
       {/* Products Section - Premium Grid */}
       <section className="py-16 md:py-24 px-4 bg-white">
         <div className="max-w-7xl mx-auto">
@@ -323,7 +388,55 @@ export default function Home() {
           )}
         </div>
       </section>
+      </>)}
 
+      {homepageSections?.showStats !== false && (
+        <section className="py-10 px-4 bg-white border-y border-gray-100">
+          <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+            <div><div className="text-3xl font-bold">1000+</div><div className="text-sm text-gray-500">Happy Customers</div></div>
+            <div><div className="text-3xl font-bold">100+</div><div className="text-sm text-gray-500">Fashion Styles</div></div>
+            <div><div className="text-3xl font-bold">4.8/5</div><div className="text-sm text-gray-500">Customer Rating</div></div>
+            <div><div className="text-3xl font-bold">Pan India</div><div className="text-sm text-gray-500">Shipping</div></div>
+          </div>
+        </section>
+      )}
+
+      {homepageSections?.showWhyChoose !== false && (
+        <section className="py-14 px-4 bg-gray-50">
+          <div className="max-w-7xl mx-auto text-center">
+            <h2 className="text-3xl md:text-4xl font-bold mb-8">Why Choose {storeName}</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
+              {[['Quality', 'Premium fabrics and carefully selected collections'], ['Easy Shopping', 'Simple and secure online ordering'], ['Fast Delivery', 'Reliable delivery across India'], ['Easy Returns', 'Customer-friendly return support']].map(([title, text]) => (
+                <div key={title} className="bg-white rounded-2xl p-6 shadow-sm"><h3 className="font-bold text-lg mb-2">{title}</h3><p className="text-sm text-gray-500">{text}</p></div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {(customBanners || []).length > 0 && (
+        <section className="py-14 px-4 bg-white"><div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+          {(customBanners || []).map((banner: any) => (
+            <div key={banner.id} className="relative overflow-hidden rounded-2xl min-h-[260px] bg-gray-100">
+              {banner.imageUrl && <img src={banner.imageUrl} alt={banner.title || ''} className="absolute inset-0 w-full h-full object-cover" />}
+              <div className="absolute inset-0 bg-black/35" />
+              <div className="relative z-10 p-8 text-white min-h-[260px] flex flex-col justify-end">
+                {banner.title && <h3 className="text-2xl font-bold">{banner.title}</h3>}
+                {banner.subtitle && <p className="mt-2">{banner.subtitle}</p>}
+                {banner.buttonText && banner.buttonLink && <Link to={banner.buttonLink}><Button className="mt-4">{banner.buttonText}</Button></Link>}
+              </div>
+            </div>
+          ))}
+        </div></section>
+      )}
+
+      {homepageSections?.showBenefits !== false && (trustBadges || []).some((b: any) => b.active) && (
+        <section className="py-10 px-4 bg-white"><div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4">
+          {(trustBadges || []).filter((b: any) => b.active).map((badge: any) => { const Icon = badgeIcons[badge.icon] || BadgeCheck; return <div key={badge.id} className="flex items-center gap-3 rounded-xl border p-4"><Icon className="h-6 w-6 shrink-0" /><span className="font-medium text-sm">{badge.label}</span></div>; })}
+        </div></section>
+      )}
+
+      {homepageSections?.showTestimonials !== false && (<>
       {/* Customer Reviews Carousel - Premium Design */}
       <section className="py-16 md:py-24 px-4 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
         <div className="max-w-5xl mx-auto">
@@ -408,6 +521,7 @@ export default function Home() {
           </div>
         </div>
       </section>
+      </>)}
 
       {/* Floating WhatsApp Button - Premium Style */}
       {(whatsappWidget?.enabled !== false) && (

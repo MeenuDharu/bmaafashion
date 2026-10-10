@@ -15,6 +15,7 @@ import {
   Bell,
   Send,
   Layers,
+  Sparkles,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -77,6 +78,11 @@ const adminMenuItems = [
     title: "Inventory",
     url: "/admin/inventory",
     icon: BarChart3,
+  },
+  {
+    title: "Commerce Features",
+    url: "/admin/commerce",
+    icon: Sparkles,
   },
   // {
   //   title: "Exports",

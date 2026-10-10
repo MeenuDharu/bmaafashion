@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Product, CartItem } from '@shared/schema';
+import { Product, ProductVariant, CartItem } from '@shared/schema';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from './AuthContext';
 
@@ -9,12 +9,15 @@ interface LocalCartItem {
   productId: string;
   quantity: number;
   size?: string;
+  color?: string;
+  variantId?: string;
   addedAt: string;
 }
 
 // Enhanced cart item with product details for UI
 interface CartItemWithProduct extends CartItem {
   product: Product;
+  variant: ProductVariant | null;
 }
 
 interface CartContextType {
@@ -24,15 +27,15 @@ interface CartContextType {
   isSyncing: boolean;
   isMigrating: boolean;
   sessionId: string;
-  addToCart: (product: Product, quantity?: number, size?: string) => Promise<boolean>;
-  removeFromCart: (productId: string) => Promise<boolean>;
-  updateQuantity: (productId: string, quantity: number) => Promise<boolean>;
+  addToCart: (product: Product, quantity?: number, size?: string, color?: string, variantId?: string) => Promise<boolean>;
+  removeFromCart: (productId: string, quantity?: number, size?: string, color?: string, variantId?: string) => Promise<boolean>;
+  updateQuantity: (productId: string, quantity: number, size?: string, color?: string, variantId?: string) => Promise<boolean>;
   clearCart: () => Promise<void>;
   openCart: () => void;
   closeCart: () => void;
   getTotalItems: () => number;
   getTotalPrice: () => number;
-  validateStock: (productId: string, requestedQuantity: number) => Promise<{ isValid: boolean; availableStock: number; }>;
+  validateStock: (productId: string, requestedQuantity: number, size?: string, color?: string, variantId?: string) => Promise<{ isValid: boolean; availableStock: number; }>;
   syncCartWithServer: () => Promise<void>;
   mergeGuestCart: () => Promise<void>;
 }
@@ -85,7 +88,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   // Debouncing state for performance optimization
   const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
-  const pendingUpdates = useRef<Map<string, { productId: string; quantity: number; timestamp: number }>>(new Map());
+  const pendingUpdates = useRef<Map<string, { productId: string; quantity: number; timestamp: number; size?: string; color?: string; variantId?: string }>>(new Map());
   const optimisticCartState = useRef<CartItemWithProduct[]>([]);
   
   // Track pending cart item creations to avoid updating optimistic IDs
@@ -136,16 +139,20 @@ export function CartProvider({ children }: { children: ReactNode }) {
             if (productResponse.ok) {
               const product = await productResponse.json();
               cartWithProducts.push({
-                id: `local_${localItem.productId}`,
+                id: `local_${localItem.productId}_${localItem.size || 'nosize'}_${localItem.color || 'nocolor'}`,
                 userId: null,
                 sessionId,
                 productId: localItem.productId,
+                variantId: localItem.variantId || null,
                 quantity: localItem.quantity,
+                size: localItem.size || null,
+                color: localItem.color || null,
                 addedAt: new Date(localItem.addedAt),
                 updatedAt: new Date(localItem.addedAt),
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
                 createdAt: new Date(localItem.addedAt),
                 product,
+                variant: null,
               });
             }
           } catch (error) {
@@ -208,7 +215,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           console.log(`🔍 Found ${currentCartItems.length} cart items in cache for product ${update.productId}`);
           
           // Find the cart item to update using the current cart data (must use real server ID, not optimistic ID)
-          const cartItem = currentCartItems.find(item => item.productId === update.productId && !item.id.startsWith('optimistic_'));
+          const cartItem = currentCartItems.find(item => item.productId === update.productId && item.variantId === (update.variantId || undefined) && !item.id.startsWith('optimistic_'));
           
           console.log(`🎯 Cart item found for update:`, cartItem ? `ID: ${cartItem.id}, Qty: ${cartItem.quantity}` : 'NOT FOUND');
           
@@ -246,14 +253,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
               credentials: 'include',
               body: JSON.stringify({
                 productId: update.productId,
+                variantId: update.variantId || null,
                 quantity: update.quantity,
+                size: update.size || null,
+                color: update.color || null,
               }),
             });
           }
         } else {
           // Guest user: update localStorage
           const localItems = getLocalCart();
-          const itemIndex = localItems.findIndex(item => item.productId === update.productId);
+          const itemIndex = localItems.findIndex(item => item.productId === update.productId && item.variantId === (update.variantId || undefined));
 
           if (itemIndex >= 0) {
             if (update.quantity === 0) {
@@ -274,7 +284,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [user, token, sessionId, queryClient]);
 
   // Debounced update method for performance optimization
-  const debouncedCartUpdate = useCallback((productId: string, quantity: number) => {
+  const debouncedCartUpdate = useCallback((productId: string, quantity: number, size?: string, color?: string, variantId?: string) => {
     console.log(`⏰ Scheduling debounced update for product ${productId}: quantity ${quantity}`);
     
     // Clear existing timeout
@@ -284,6 +294,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
     pendingUpdates.current.set(productId, {
       productId,
       quantity,
+      size,
+      color,
+      variantId,
       timestamp: Date.now(),
     });
     
@@ -294,8 +307,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [clearDebounceTimeout, processPendingUpdates]);
 
   // Update optimistic cart state for immediate UI feedback
-  const updateOptimisticState = useCallback((productId: string, quantity: number, product?: Product) => {
-    optimisticCartState.current = optimisticCartState.current.filter(item => item.productId !== productId);
+  const updateOptimisticState = useCallback((productId: string, quantity: number, product?: Product, size?: string, color?: string, variantId?: string) => {
+    optimisticCartState.current = optimisticCartState.current.filter(item => !(item.productId === productId && item.variantId === (variantId || undefined)));
     
     if (quantity > 0 && product) {
       optimisticCartState.current.push({
@@ -304,17 +317,21 @@ export function CartProvider({ children }: { children: ReactNode }) {
         sessionId,
         productId,
         quantity,
+        size: size || null,
+        color: color || null,
+        variantId: variantId || null,
         addedAt: new Date(),
         updatedAt: new Date(),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
         createdAt: new Date(),
         product,
+        variant: null,
       });
     }
     
     // Trigger re-render by invalidating query cache
     queryClient.setQueryData(['cart', user?.id, sessionId], [...optimisticCartState.current]);
-  }, [user, sessionId]);
+  }, [user, sessionId, queryClient]);
 
   // Cleanup debounce timeout on unmount
   useEffect(() => {
@@ -557,7 +574,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   // Cart mutation for adding items
   const addToCartMutation = useMutation({
-    mutationFn: async ({ product, quantity = 1, size }: { product: Product; quantity?: number; size?: string }) => {
+    mutationFn: async ({ product, quantity = 1, size, color, variantId }: { product: Product; quantity?: number; size?: string; color?: string; variantId?: string }) => {
       if (user && token) {
         // Authenticated user: use API
         const response = await fetch('/api/cart', {
@@ -572,6 +589,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
             productId: product.id,
             quantity,
             size,
+            color,
+            variantId,
           }),
         });
 
@@ -584,7 +603,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
       } else {
         // Guest user: use localStorage
         const localItems = getLocalCart();
-        const existingItemIndex = localItems.findIndex(item => item.productId === product.id && item.size === size);
+        const existingItemIndex = localItems.findIndex(item =>
+          item.productId === product.id &&
+          item.variantId === (variantId || undefined) &&
+          item.size === size &&
+          item.color === color
+        );
 
         if (existingItemIndex >= 0) {
           localItems[existingItemIndex].quantity += quantity;
@@ -593,6 +617,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
             productId: product.id,
             quantity,
             size,
+            color,
+            variantId,
             addedAt: new Date().toISOString(),
           });
         }
@@ -625,10 +651,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   // Cart mutation for updating quantity
   const updateQuantityMutation = useMutation({
-    mutationFn: async ({ productId, quantity }: { productId: string; quantity: number }) => {
+    mutationFn: async ({ productId, quantity, size, color, variantId }: { productId: string; quantity: number; size?: string; color?: string; variantId?: string }) => {
       if (user && token) {
         // Find the cart item to update
-        const cartItem = cartItems.find(item => item.productId === productId);
+        const cartItem = cartItems.find(item => item.productId === productId && item.variantId === (variantId || undefined) && item.size === (size || null) && item.color === (color || null));
         if (!cartItem) {
           throw new Error('Cart item not found');
         }
@@ -670,7 +696,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       } else {
         // Guest user: use localStorage
         const localItems = getLocalCart();
-        const itemIndex = localItems.findIndex(item => item.productId === productId);
+        const itemIndex = localItems.findIndex(item => item.productId === productId && item.variantId === (variantId || undefined) && item.size === (size || undefined) && item.color === (color || undefined));
 
         if (itemIndex >= 0) {
           if (quantity === 0) {
@@ -738,18 +764,32 @@ export function CartProvider({ children }: { children: ReactNode }) {
   });
 
   // Validate stock availability
-  const validateStock = async (productId: string, requestedQuantity: number): Promise<{ isValid: boolean; availableStock: number; }> => {
+  const validateStock = async (
+    productId: string,
+    requestedQuantity: number,
+    size?: string,
+    color?: string,
+    variantId?: string
+  ): Promise<{ isValid: boolean; availableStock: number; }> => {
     try {
+      if (variantId || size || color) {
+        const response = await fetch(`/api/products/${productId}/variants`);
+        if (!response.ok) throw new Error('Failed to check variant stock');
+        const variants = await response.json();
+        const variant = variants.find((v: ProductVariant) =>
+          (variantId ? v.id === variantId : true) &&
+          (!variantId || ((v.size ?? null) === (size ?? null) && (v.color ?? null) === (color ?? null))) &&
+          v.isActive !== false
+        );
+        const availableStock = Number(variant?.stockQuantity || 0);
+        return { isValid: !!variant && availableStock >= requestedQuantity, availableStock };
+      }
+
       const response = await fetch(`/api/inventory/${productId}`);
       if (!response.ok) throw new Error('Failed to check stock');
-      
       const stockData = await response.json();
-      const availableStock = stockData.quantityInStock || 0;
-      
-      return {
-        isValid: availableStock >= requestedQuantity,
-        availableStock
-      };
+      const availableStock = Number(stockData.quantityInStock || 0);
+      return { isValid: availableStock >= requestedQuantity, availableStock };
     } catch (error) {
       console.error('Stock validation error:', error);
       return { isValid: false, availableStock: 0 };
@@ -757,20 +797,30 @@ export function CartProvider({ children }: { children: ReactNode }) {
   };
 
   // Public API methods with debounced updates and optimistic UI
-  const addToCart = async (product: Product, quantity: number = 1, size?: string): Promise<boolean> => {
+  const addToCart = async (product: Product, quantity: number = 1, size?: string, color?: string, variantId?: string): Promise<boolean> => {
     if (addToCartMutation.isPending) return false;
     
     try {
       // Check stock availability first - use optimistic state for real-time accuracy
-      const optimisticItem = optimisticCartState.current.find(item => item.productId === product.id);
-      const queryItem = cartItems.find(item => item.productId === product.id);
+      const optimisticItem = optimisticCartState.current.find(item =>
+        item.productId === product.id &&
+        item.variantId === (variantId || undefined) &&
+        item.size === (size || null) &&
+        item.color === (color || null)
+      );
+      const queryItem = cartItems.find(item =>
+        item.productId === product.id &&
+        item.variantId === (variantId || undefined) &&
+        item.size === (size || null) &&
+        item.color === (color || null)
+      );
       const existingItem = optimisticItem || queryItem;
       const currentQuantityInCart = existingItem?.quantity || 0;
       const requestedQuantity = currentQuantityInCart + quantity;
       
-      console.log(`🛒 Adding ${quantity} to cart - Current: ${currentQuantityInCart}, New total: ${requestedQuantity}`);
+      console.log(`🛒 Adding ${quantity} to cart - Current: ${currentQuantityInCart}, New total: ${requestedQuantity}`, size ? `Size: ${size}` : '', color ? `Color: ${color}` : '');
       
-      const stockCheck = await validateStock(product.id, requestedQuantity);
+      const stockCheck = await validateStock(product.id, requestedQuantity, size, color, variantId);
       
       if (!stockCheck.isValid) {
         if (stockCheck.availableStock === 0) {
@@ -795,10 +845,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
         return false;
       }
       
-      console.log('Added to cart:', product.id, size ? `Size: ${size}` : '');
+      console.log('Added to cart:', product.id, size ? `Size: ${size}` : '', color ? `Color: ${color}` : '');
       
       // Track this pending cart item creation
-      const createPromise = addToCartMutation.mutateAsync({ product, quantity, size });
+      const createPromise = addToCartMutation.mutateAsync({ product, quantity, size, color, variantId });
       pendingCreates.current.set(product.id, createPromise);
       
       // Always use direct server mutation - backend handles upsert (add to existing quantity)
@@ -816,10 +866,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const removeFromCart = async (productId: string): Promise<boolean> => {
+  const removeFromCart = async (productId: string, quantity?: number, size?: string, color?: string, variantId?: string): Promise<boolean> => {
     try {
       // Use optimistic update for immediate UI feedback
-      updateOptimisticState(productId, 0);
+      updateOptimisticState(productId, 0, undefined, size, color, variantId);
       
       // Cancel any pending debounced updates for this product to prevent re-adding
       pendingUpdates.current.delete(productId);
@@ -827,8 +877,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
       // Make immediate server update for deletion to avoid race conditions
       if (user && token) {
         // Find the cart item to delete
-        const cartItem = optimisticCartState.current.find(item => item.productId === productId) || 
-                         cartItems.find(item => item.productId === productId);
+        const cartItem = optimisticCartState.current.find(item => item.productId === productId && item.variantId === (variantId || undefined) && item.size === (size || null) && item.color === (color || null)) || 
+                         cartItems.find(item => item.productId === productId && item.variantId === (variantId || undefined) && item.size === (size || null) && item.color === (color || null));
         
         if (cartItem) {
           await fetch(`/api/cart/${cartItem.id}`, {
@@ -845,7 +895,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       } else {
         // Guest user: immediately update localStorage
         const localItems = getLocalCart();
-        const filteredItems = localItems.filter(item => item.productId !== productId);
+        const filteredItems = localItems.filter(item => !(item.productId === productId && item.variantId === (variantId || undefined) && item.size === (size || undefined) && item.color === (color || undefined)));
         saveLocalCart(filteredItems);
         
         // Refresh cart data immediately
@@ -859,17 +909,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateQuantity = async (productId: string, quantity: number): Promise<boolean> => {
+  const updateQuantity = async (productId: string, quantity: number, size?: string, color?: string, variantId?: string): Promise<boolean> => {
     if (quantity < 0) return false;
     
     // Find the product for optimistic update and error recovery
-    const existingItem = cartItems.find(item => item.productId === productId);
+    const existingItem = cartItems.find(item => item.productId === productId && item.variantId === (variantId || undefined) && item.size === (size || null) && item.color === (color || null));
     const product = existingItem?.product;
     
     try {
       // Check stock availability for the new quantity
       if (quantity > 0) {
-        const stockCheck = await validateStock(productId, quantity);
+        const stockCheck = await validateStock(productId, quantity, size, color, variantId);
         
         if (!stockCheck.isValid) {
           toast({
@@ -882,11 +932,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
       }
       
       // Use optimistic update for immediate UI feedback
-      updateOptimisticState(productId, quantity, product);
+      updateOptimisticState(productId, quantity, product, size || existingItem?.size || undefined, color || existingItem?.color || undefined, variantId || existingItem?.variantId || undefined);
       
       // Use direct mutation for quantity updates instead of debounced system
       // This ensures the server update happens immediately without conflicts
-      await updateQuantityMutation.mutateAsync({ productId, quantity });
+      await updateQuantityMutation.mutateAsync({ productId, quantity, size, color, variantId });
       
       return true;
     } catch (error) {
@@ -919,7 +969,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const getTotalPrice = () => {
     return cartItems.reduce((total, item) => {
       const product = item.product;
-      return total + (product ? Number(product.price) * item.quantity : 0);
+      const unitPrice = item.variant?.price ?? product?.price;
+      return total + (unitPrice ? Number(unitPrice) * item.quantity : 0);
     }, 0);
   };
 

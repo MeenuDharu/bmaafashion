@@ -1,3 +1,6 @@
+// Twilio's package exports its bundled types through an export map that older TypeScript
+// module-resolution settings cannot resolve reliably. The runtime API is unchanged.
+// @ts-expect-error Twilio's package export map does not expose the bundled declaration under bundler resolution.
 import twilio from 'twilio';
 import { parsePhoneNumber, isValidPhoneNumber } from 'libphonenumber-js';
 import crypto from 'crypto';
@@ -564,10 +567,13 @@ export async function processWhatsappQueue(): Promise<void> {
       try {
         // Check if retry delay has passed
         const now = new Date();
-        const scheduledTime = new Date(whatsapp.scheduledAt);
+        const scheduledTime = new Date(whatsapp.scheduledAt ?? new Date());
 
-        if (whatsapp.retryCount > 0) {
-          const delayMs = retryDelays[Math.min(whatsapp.retryCount - 1, retryDelays.length - 1)];
+        const retryCount = whatsapp.retryCount ?? 0;
+        const maxRetryCount = whatsapp.maxRetries ?? maxRetries;
+
+        if (retryCount > 0) {
+          const delayMs = retryDelays[Math.min(retryCount - 1, retryDelays.length - 1)];
           const nextRetryTime = new Date(scheduledTime.getTime() + delayMs);
 
           if (now < nextRetryTime) {
@@ -582,8 +588,8 @@ export async function processWhatsappQueue(): Promise<void> {
           to: whatsapp.to,
           from: whatsapp.from,
           message: whatsapp.message,
-          mediaUrl: whatsapp.mediaUrl,
-          mediaType: whatsapp.mediaType,
+          mediaUrl: whatsapp.mediaUrl ?? undefined,
+          mediaType: whatsapp.mediaType ?? undefined,
         });
 
         if (result.success) {
@@ -605,21 +611,23 @@ export async function processWhatsappQueue(): Promise<void> {
               conversationId: result.conversationId,
               templateName: whatsapp.templateName,
               numMedia: whatsapp.mediaUrl ? 1 : 0,
-              mediaType: whatsapp.mediaType,
+              mediaType: whatsapp.mediaType ?? undefined,
             });
           }
 
           console.log(`✅ WhatsApp sent successfully: ${whatsapp.id}`);
         } else {
           // WhatsApp failed to send
-          const newRetryCount = whatsapp.retryCount + 1;
+          const retryCount = whatsapp.retryCount ?? 0;
+          const maxRetryCount = whatsapp.maxRetries ?? 3;
+          const newRetryCount = retryCount + 1;
 
-          if (newRetryCount >= whatsapp.maxRetries) {
+          if (newRetryCount >= maxRetryCount) {
             // Max retries reached, mark as failed
             await storage.updateWhatsappQueueStatus(whatsapp.id, 'failed', {
               lastError: result.error,
             });
-            console.error(`❌ WhatsApp failed permanently after ${whatsapp.maxRetries} retries: ${whatsapp.id}`);
+            console.error(`❌ WhatsApp failed permanently after ${maxRetryCount} retries: ${whatsapp.id}`);
           } else {
             // Schedule retry
             await storage.updateWhatsappQueueRetry(whatsapp.id, newRetryCount, result.error);
@@ -630,8 +638,10 @@ export async function processWhatsappQueue(): Promise<void> {
         console.error(`❌ Error processing WhatsApp ${whatsapp.id}:`, error);
 
         // Update retry count
-        const newRetryCount = whatsapp.retryCount + 1;
-        if (newRetryCount >= whatsapp.maxRetries) {
+        const retryCount = whatsapp.retryCount ?? 0;
+        const maxRetryCount = whatsapp.maxRetries ?? 3;
+        const newRetryCount = retryCount + 1;
+        if (newRetryCount >= maxRetryCount) {
           await storage.updateWhatsappQueueStatus(whatsapp.id, 'failed', {
             lastError: (error as Error).message,
           });

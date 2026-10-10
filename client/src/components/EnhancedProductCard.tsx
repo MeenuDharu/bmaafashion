@@ -7,6 +7,7 @@ import { Product } from "@shared/schema";
 import { useWishlist } from "@/hooks/useWishlist";
 import { StarRating } from "./StarRating";
 import { useQuery } from "@tanstack/react-query";
+import { VariantSelectorDialog } from "./VariantSelectorDialog";
 
 // Helper function to convert relative image paths to full API URLs
 const getImageUrl = (imagePath: string): string => {
@@ -23,14 +24,15 @@ interface EnhancedProductCardProps {
   onViewDetails?: (productId: string) => void;
 }
 
-export default function EnhancedProductCard({ 
-  product, 
-  onAddToCart, 
-  onViewDetails 
+export default function EnhancedProductCard({
+  product,
+  onAddToCart,
+  onViewDetails
 }: EnhancedProductCardProps) {
   const { isInWishlist, toggleWishlist, isLoading: isWishlistLoading } = useWishlist();
   const isWishlisted = isInWishlist(product.id);
   const [isHovering, setIsHovering] = useState(false);
+  const [isVariantDialogOpen, setIsVariantDialogOpen] = useState(false);
 
   // Fetch product rating data
   const { data: ratingData } = useQuery({
@@ -43,6 +45,19 @@ export default function EnhancedProductCard({
     retry: false,
     staleTime: 5 * 60 * 1000,
   });
+
+  // Check if product has variants
+  const { data: variants = [] } = useQuery({
+    queryKey: ['/api/products', product.id, 'variants'],
+    queryFn: async () => {
+      const response = await fetch(`/api/products/${product.id}/variants`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const hasVariants = variants.length > 0;
 
   const displayImages = product.images?.length > 0 
     ? product.images.map(getImageUrl) 
@@ -63,6 +78,8 @@ export default function EnhancedProductCard({
           src={currentImage} 
           alt={product.name}
           className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
+          loading="lazy"
+          decoding="async"
           data-testid={`img-product-${product.id}`}
         />
         
@@ -136,15 +153,28 @@ export default function EnhancedProductCard({
           {!isOutOfStock && (
             <Button
               size="sm"
-              onClick={() => onAddToCart?.(product.id)}
+              onClick={() => {
+                if (hasVariants) {
+                  setIsVariantDialogOpen(true);
+                } else {
+                  onAddToCart?.(product.id);
+                }
+              }}
               className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-lg"
               data-testid={`button-add-to-cart-${product.id}`}
             >
               <ShoppingCart className="h-4 w-4 mr-2" />
-              Add to Cart
+              {hasVariants ? 'Select Options' : 'Add to Cart'}
             </Button>
           )}
         </div>
+        
+        {/* Variant Selector Dialog */}
+        <VariantSelectorDialog
+          product={product}
+          open={isVariantDialogOpen}
+          onOpenChange={setIsVariantDialogOpen}
+        />
       </div>
       
       {/* Content Section */}

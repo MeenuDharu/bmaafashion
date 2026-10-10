@@ -23,7 +23,7 @@ export default function ProductCardExample() {
   return (
     <div className="max-w-sm">
       <ProductCard 
-        product={mockProduct}
+        product={mockProduct as any}
         onAddToCart={(id) => console.log('Added to cart:', id)}
         onViewDetails={(id) => console.log('View details:', id)}
       />

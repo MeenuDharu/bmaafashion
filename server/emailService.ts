@@ -1210,7 +1210,7 @@ export async function sendPaymentConfirmationEmail(
       order,
       customerName,
       paymentMethod,
-      receiptUrl: `${process.env.DOMAIN || "http://localhost:5000"}/api/orders/${order.id}/receipt`,
+      receiptUrl: `${process.env.DOMAIN || "http://localhost:5000"}/api/orders/${order.id}/invoice`,
     },
     userId,
   });

@@ -27,6 +27,7 @@ const farmImage = safeImageImport("/attached_assets/heroicimage.png");
 const techImage = safeImageImport("/attached_assets/banner1.jpeg");
 
 export default function About() {
+  const { pageBanners, seoSettings } = useSiteSettings();
   const aboutStructuredData = useMemo(() => [
     ORGANIZATION_DATA,
     LOCAL_BUSINESS_DATA,
@@ -38,8 +39,10 @@ export default function About() {
 
   useSEO({
     title:
+      seoSettings?.about?.title ||
       "About Bmaafashion | Fashion & Style Experts",
     description:
+      seoSettings?.about?.description ||
       "Learn about Bmaafashion, your trusted fashion partner. Discover our curated collections, style expertise, and commitment to bringing you the latest fashion trends.",
     ogTitle:
       "About Bmaafashion | Redefining Fashion Through Innovation",
@@ -87,7 +90,6 @@ export default function About() {
     "Commitment to customer satisfaction",
   ];
 
-  const { pageBanners } = useSiteSettings();
   const banner = pageBanners?.about;
   const bannerTitle = banner?.title || "About Us";
   const bannerSubtitle = banner?.subtitle || "A considered collection of modern elegance, timeless design, and personal style";

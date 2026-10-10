@@ -26,6 +26,8 @@ const contactFormSchema = z.object({
 type ContactFormValues = z.infer<typeof contactFormSchema>;
 
 export default function Contact() {
+  const { contactInfo: settingsContact, pageBanners, seoSettings } = useSiteSettings();
+
   const contactStructuredData = useMemo(() => [
     ORGANIZATION_DATA,
     generateContactPageSchema(),
@@ -36,8 +38,8 @@ export default function Contact() {
   ], []);
 
   useSEO({
-    title: "Contact Bmaafashion | Fashion Support & Inquiry",
-    description: "Get in touch with Bmaafashion for fashion inquiries, customer support, or business partnerships. We're here to help!",
+    title: seoSettings?.contact?.title || "Contact Bmaafashion | Fashion Support & Inquiry",
+    description: seoSettings?.contact?.description || "Get in touch with Bmaafashion for fashion inquiries, customer support, or business partnerships. We're here to help!",
     ogTitle: "Contact Us - Bmaafashion",
     ogDescription: "Have questions about our dress collections? Our expert styling team is here to help. Contact us for product information, styling advice, or custom services.",
     ogImage: "/attached_assets/bmaafashion.jpeg",
@@ -95,7 +97,6 @@ export default function Contact() {
     }
   };
 
-  const { contactInfo: settingsContact, pageBanners } = useSiteSettings();
   const banner = pageBanners?.contact;
   const bannerTitle = banner?.title || "Contact Us";
   const bannerSubtitle = banner?.subtitle || "Get in touch with our hydroponic experts. We're here to help you grow successfully with personalized support and guidance.";

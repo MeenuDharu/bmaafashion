@@ -42,7 +42,7 @@ export default function ShoppingCartSlideoutExample() {
     }
   ]);
 
-  const handleUpdateQuantity = (productId: string, newQuantity: number) => {
+  const handleUpdateQuantity = async (productId: string, newQuantity: number, _size?: string, _color?: string, _variantId?: string): Promise<boolean> => {
     if (newQuantity === 0) {
       setCartItems(items => items.filter(item => item.id !== productId));
     } else {
@@ -52,10 +52,12 @@ export default function ShoppingCartSlideoutExample() {
         )
       );
     }
+    return true;
   };
 
-  const handleRemoveItem = (productId: string) => {
+  const handleRemoveItem = async (productId: string, _quantity?: number, _size?: string, _color?: string, _variantId?: string): Promise<boolean> => {
     setCartItems(items => items.filter(item => item.id !== productId));
+    return true;
   };
 
   return (
@@ -67,7 +69,7 @@ export default function ShoppingCartSlideoutExample() {
       <ShoppingCartSlideout
         isOpen={isOpen}
         onClose={() => setIsOpen(false)}
-        items={cartItems}
+        items={cartItems as any}
         onUpdateQuantity={handleUpdateQuantity}
         onRemoveItem={handleRemoveItem}
         onCheckout={() => console.log('Checkout clicked')}

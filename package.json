@@ -14,10 +14,15 @@
     "db:seed-categories": "tsx scripts/seedCategories.ts",
     "db:seed-dress": "tsx scripts/seedDressData.ts",
     "db:seed-ethnic": "tsx scripts/seedEthnicWear.ts",
+    "db:seed-fashion": "tsx scripts/seedFashionProducts.ts",
+    "db:seed-product-variants": "tsx scripts/seedProductVariants.ts",
+    "seed:variants": "tsx scripts/seedProductsWithVariants.ts",
+    "db:seed-bmaa-fashion-catalog": "tsx scripts/seedBmaaFashionCatalog.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:backup": "tsx scripts/backup.ts",
-    "deploy": "./scripts/deploy.sh"
+    "deploy": "./scripts/deploy.sh",
+    "commerce:maintenance": "tsx scripts/commerceMaintenance.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

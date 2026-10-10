@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { StarRating } from "./StarRating";
+import { VariantSelectorDialog } from "./VariantSelectorDialog";
 
 // Helper function to convert relative image paths to full API URLs
 const getImageUrl = (imagePath: string): string => {
@@ -39,11 +40,25 @@ export default function ProductCard({ product, onAddToCart, onViewDetails }: Pro
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isHovering, setIsHovering] = useState(false);
   const [isWaitlistDialogOpen, setIsWaitlistDialogOpen] = useState(false);
+  const [isVariantDialogOpen, setIsVariantDialogOpen] = useState(false);
   const [waitlistEmail, setWaitlistEmail] = useState("");
   const [notifyWhenAvailable, setNotifyWhenAvailable] = useState(true);
   const { toast } = useToast();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+
+  // Check if product has variants
+  const { data: variants = [] } = useQuery({
+    queryKey: ['/api/products', product.id, 'variants'],
+    queryFn: async () => {
+      const response = await fetch(`/api/products/${product.id}/variants`);
+      if (!response.ok) return [];
+      return response.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const hasVariants = variants.length > 0;
 
   // Fetch product rating data
   const { data: ratingData } = useQuery({
@@ -503,27 +518,46 @@ export default function ProductCard({ product, onAddToCart, onViewDetails }: Pro
               </DialogContent>
             </Dialog>
           ) : (
-            <Button
-              onClick={() => onAddToCart?.(product.id)}
-              disabled={stockInfo.urgency === 'critical' && product.inStock <= 1}
-              variant={stockInfo.urgency === 'critical' ? "destructive" : "default"}
-              className="flex-1"
-              data-testid={`button-add-to-cart-${product.id}`}
-            >
-              <ShoppingCart className="h-4 w-4 mr-2" />
-              <span className="hidden xs:inline">
-                {stockInfo.urgency === 'critical' && product.inStock <= 1 
-                  ? 'Last One - Order Now!' 
-                  : 'Add to Cart'
-                }
-              </span>
-              <span className="xs:hidden">
-                {stockInfo.urgency === 'critical' && product.inStock <= 1 
-                  ? 'Last One!' 
-                  : 'Add'
-                }
-              </span>
-            </Button>
+            <>
+              <Button
+                onClick={() => {
+                  if (hasVariants) {
+                    setIsVariantDialogOpen(true);
+                  } else {
+                    onAddToCart?.(product.id);
+                  }
+                }}
+                disabled={stockInfo.urgency === 'critical' && product.inStock <= 1}
+                variant={stockInfo.urgency === 'critical' ? "destructive" : "default"}
+                className="flex-1"
+                data-testid={`button-add-to-cart-${product.id}`}
+              >
+                <ShoppingCart className="h-4 w-4 mr-2" />
+                <span className="hidden xs:inline">
+                  {hasVariants
+                    ? 'Select Options'
+                    : stockInfo.urgency === 'critical' && product.inStock <= 1
+                    ? 'Last One - Order Now!'
+                    : 'Add to Cart'
+                  }
+                </span>
+                <span className="xs:hidden">
+                  {hasVariants
+                    ? 'Select'
+                    : stockInfo.urgency === 'critical' && product.inStock <= 1
+                    ? 'Last One!'
+                    : 'Add'
+                  }
+                </span>
+              </Button>
+              
+              {/* Variant Selector Dialog */}
+              <VariantSelectorDialog
+                product={product}
+                open={isVariantDialogOpen}
+                onOpenChange={setIsVariantDialogOpen}
+              />
+            </>
           )}
         </div>
       </CardFooter>

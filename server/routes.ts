@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import jwt from "jsonwebtoken";
 import { storage } from "./storage";
+import { variantStorage } from "./variantStorage";
 import { setupAuthRoutes } from "./authRoutes";
 import { authenticateToken, requireAdmin, type AuthenticatedRequest, hashPassword, verifyOrderAccessToken, generateToken } from "./jwtAuth";
 import { NotificationService } from "./notificationService";
@@ -14,6 +15,9 @@ import express from "express";
 import multer from "multer";
 import fs from 'fs';
 import sharp from 'sharp';
+import { db } from "./db";
+import { eq, and, sql } from "drizzle-orm";
+import { productVariants, products } from "@shared/schema";
 import {
   insertProductSchema,
   insertCategorySchema,
@@ -60,9 +64,13 @@ import {
   analyticsExportSchema,
   exportRequestSchema,
   exportStatusUpdateSchema,
-  csvConfigSchema
+  csvConfigSchema,
+  insertMessageTemplateSchema,
+  bulkNotificationRequestSchema
 } from "@shared/schema";
+import { orders as ordersTable } from "@shared/schema";
 import { z } from "zod";
+import { registerCommerceFeatureRoutes, awardLoyaltyForCompletedOrder } from "./commerceFeatureRoutes";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -76,7 +84,14 @@ function getAuthenticatedUser(req: any): { user: AuthenticatedRequest['user'] } 
   return { user: authReq.user };
 }
 
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '').replace(/[&<>\"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' } as Record<string, string>)[char] || char);
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Additive production commerce features; existing routes remain unchanged.
+  registerCommerceFeatureRoutes(app);
   // Setup JWT authentication routes
   setupAuthRoutes(app);
 
@@ -133,6 +148,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Error fetching order with token:', error);
       res.status(401).json({ message: 'Invalid or expired token' });
     }
+  });
+
+  // SEO essentials for production indexing.
+  app.get('/robots.txt', (_req, res) => {
+    const domain = process.env.DOMAIN || 'https://bmaafashion.com';
+    res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api\nSitemap: ${domain.replace(/\/$/, '')}/sitemap.xml\n`);
+  });
+  app.get('/sitemap.xml', async (_req, res) => {
+    try {
+      const rows = await db.select({ id: products.id, updatedAt: products.updatedAt }).from(products);
+      const domain = (process.env.DOMAIN || 'https://bmaafashion.com').replace(/\/$/, '');
+      const urls = ['/', '/products', '/categories', '/about', '/contact', '/shipping-policy', '/return-policy', '/privacy-policy', '/terms-of-service', ...rows.map(p => `/products/${p.id}`)];
+      const xml = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map(u => `<url><loc>${domain}${u}</loc></url>`).join('')}</urlset>`;
+      res.type('application/xml').send(xml);
+    } catch (error) { res.status(500).type('text/plain').send('Sitemap unavailable'); }
   });
 
   // Static image serving from attached_assets
@@ -1255,6 +1285,221 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get product variants
+  app.get('/api/products/:id/variants', async (req, res) => {
+    try {
+      const productId = req.params.id;
+      
+      // Verify product exists
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+
+      // Get variants from database
+      const variants = await db
+        .select()
+        .from(productVariants)
+        .where(eq(productVariants.productId, productId))
+        .orderBy(productVariants.sortOrder, productVariants.size);
+
+      res.json(variants);
+    } catch (error) {
+      console.error('Error fetching product variants:', error);
+      res.status(500).json({ error: 'Failed to fetch variants' });
+    }
+  });
+
+  // Get specific variant stock
+  app.get('/api/variants/:id/stock', async (req, res) => {
+    try {
+      const variant = await db
+        .select()
+        .from(productVariants)
+        .where(eq(productVariants.id, req.params.id))
+        .limit(1);
+
+      if (variant.length === 0) {
+        return res.status(404).json({ error: 'Variant not found' });
+      }
+
+      res.json({
+        variantId: variant[0].id,
+        stockQuantity: variant[0].stockQuantity,
+        lowStockThreshold: variant[0].lowStockThreshold,
+        isAvailable: variant[0].stockQuantity > 0 && variant[0].isActive,
+      });
+    } catch (error) {
+      console.error('Error fetching variant stock:', error);
+      res.status(500).json({ error: 'Failed to fetch variant stock' });
+    }
+  });
+
+  // Create product variant (admin only)
+  app.post('/api/products/:id/variants', requireAdmin, async (req, res) => {
+    try {
+      const productId = req.params.id;
+      
+      // Verify product exists
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+
+      const variantData = {
+        productId,
+        sku: req.body.sku || null,
+        color: req.body.color || null,
+        size: req.body.size || null,
+        price: req.body.price || null,
+        compareAtPrice: req.body.compareAtPrice || null,
+        stockQuantity: req.body.stockQuantity || 0,
+        lowStockThreshold: req.body.lowStockThreshold || 5,
+        weight: req.body.weight || null,
+        images: req.body.images || [],
+        isActive: req.body.isActive !== undefined ? req.body.isActive : true,
+        sortOrder: req.body.sortOrder || 0,
+      };
+
+      const [newVariant] = await db
+        .insert(productVariants)
+        .values(variantData)
+        .returning();
+
+      res.status(201).json(newVariant);
+    } catch (error) {
+      console.error('Error creating variant:', error);
+      res.status(500).json({ error: 'Failed to create variant' });
+    }
+  });
+
+  // Update product variant (admin only)
+  app.put('/api/variants/:id', requireAdmin, async (req, res) => {
+    try {
+      const variantId = req.params.id;
+
+      const updateData: any = {};
+      if (req.body.sku !== undefined) updateData.sku = req.body.sku;
+      if (req.body.color !== undefined) updateData.color = req.body.color;
+      if (req.body.size !== undefined) updateData.size = req.body.size;
+      if (req.body.price !== undefined) updateData.price = req.body.price;
+      if (req.body.compareAtPrice !== undefined) updateData.compareAtPrice = req.body.compareAtPrice;
+      if (req.body.stockQuantity !== undefined) updateData.stockQuantity = req.body.stockQuantity;
+      if (req.body.lowStockThreshold !== undefined) updateData.lowStockThreshold = req.body.lowStockThreshold;
+      if (req.body.weight !== undefined) updateData.weight = req.body.weight;
+      if (req.body.images !== undefined) updateData.images = req.body.images;
+      if (req.body.isActive !== undefined) updateData.isActive = req.body.isActive;
+      if (req.body.sortOrder !== undefined) updateData.sortOrder = req.body.sortOrder;
+
+      updateData.updatedAt = new Date();
+
+      const [updatedVariant] = await db
+        .update(productVariants)
+        .set(updateData)
+        .where(eq(productVariants.id, variantId))
+        .returning();
+
+      if (!updatedVariant) {
+        return res.status(404).json({ error: 'Variant not found' });
+      }
+
+      res.json(updatedVariant);
+    } catch (error) {
+      console.error('Error updating variant:', error);
+      res.status(500).json({ error: 'Failed to update variant' });
+    }
+  });
+
+  // Delete product variant (admin only)
+  app.delete('/api/variants/:id', requireAdmin, async (req, res) => {
+    try {
+      const variantId = req.params.id;
+
+      const [deletedVariant] = await db
+        .delete(productVariants)
+        .where(eq(productVariants.id, variantId))
+        .returning();
+
+      if (!deletedVariant) {
+        return res.status(404).json({ error: 'Variant not found' });
+      }
+
+      res.json({ message: 'Variant deleted successfully', variant: deletedVariant });
+    } catch (error) {
+      console.error('Error deleting variant:', error);
+      res.status(500).json({ error: 'Failed to delete variant' });
+    }
+  });
+
+  // ============================================================================
+  // PRODUCT VARIANTS ROUTES
+  // ============================================================================
+
+  // Get all variants for a product (Public)
+  app.get('/api/products/:productId/variants', async (req, res) => {
+    try {
+      const { productId } = req.params;
+      const variants = await variantStorage.getProductVariants(productId);
+      res.json(variants);
+    } catch (error) {
+      console.error('Error fetching variants:', error);
+      res.status(500).json({ error: 'Failed to fetch variants' });
+    }
+  });
+
+  // Create a new variant (Admin only)
+  app.post('/api/admin/products/:productId/variants',
+    authenticateToken,
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const { productId } = req.params;
+        const variant = await variantStorage.createProductVariant(productId, req.body);
+        res.status(201).json(variant);
+      } catch (error: any) {
+        console.error('Error creating variant:', error);
+        if (error.code === '23505') {
+          return res.status(409).json({
+            message: 'A variant with this color and size combination already exists'
+          });
+        }
+        res.status(500).json({ message: 'Failed to create variant' });
+      }
+    }
+  );
+
+  // Update a variant (Admin only)
+  app.put('/api/admin/products/variants/:variantId',
+    authenticateToken,
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const { variantId } = req.params;
+        const variant = await variantStorage.updateProductVariant(variantId, req.body);
+        res.json(variant);
+      } catch (error) {
+        console.error('Error updating variant:', error);
+        res.status(500).json({ message: 'Failed to update variant' });
+      }
+    }
+  );
+
+  // Delete a variant (Admin only)
+  app.delete('/api/admin/products/variants/:variantId',
+    authenticateToken,
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const { variantId } = req.params;
+        await variantStorage.deleteProductVariant(variantId);
+        res.json({ success: true });
+      } catch (error) {
+        console.error('Error deleting variant:', error);
+        res.status(500).json({ message: 'Failed to delete variant' });
+      }
+    }
+  );
+
   // Category routes
   app.get('/api/categories', async (req, res) => {
     try {
@@ -1970,6 +2215,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      if (statusUpdate.status === 'delivered' && updatedOrder.paymentMethod === 'cod' && updatedOrder.paymentStatus !== 'completed') {
+        await storage.updateOrderPaymentStatus(orderId, 'completed');
+        const paidOrder = await storage.getOrder(orderId);
+        if (paidOrder) await awardLoyaltyForCompletedOrder(paidOrder as any);
+      }
+
       // Trigger notification email if status changed
       try {
         await NotificationService.triggerOrderStatusUpdateEmail(
@@ -2099,19 +2350,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sessionId: userId ? null : sessionId
       });
 
-      console.log(`🛒 Adding to cart for ${userId ? `user: ${userEmail}` : `session: ${sessionId}`} - productId: ${validatedData.productId}, quantity: ${validatedData.quantity}`);
+      console.log(`🛒 Adding to cart for ${userId ? `user: ${userEmail}` : `session: ${sessionId}`} - productId: ${validatedData.productId}, variantId: ${validatedData.variantId || 'N/A'}, quantity: ${validatedData.quantity}, size: ${validatedData.size || 'N/A'}, color: ${validatedData.color || 'N/A'}`);
 
-      // Check if product exists and is in stock
+      // Check if product exists
       const product = await storage.getProduct(validatedData.productId);
       if (!product) {
         return res.status(404).json({ error: 'Product not found' });
       }
-      if (product.inStock <= 0) {
-        return res.status(400).json({ error: 'Product out of stock' });
+
+      let cartData = validatedData;
+
+      // Variant ID is authoritative. Size/color remain supported for legacy clients and are resolved to the exact variant.
+      if (validatedData.variantId || validatedData.size || validatedData.color) {
+        const variants = await db
+          .select()
+          .from(productVariants)
+          .where(
+            validatedData.variantId
+              ? and(eq(productVariants.id, validatedData.variantId), eq(productVariants.productId, validatedData.productId))
+              : and(
+                  eq(productVariants.productId, validatedData.productId),
+                  validatedData.size ? eq(productVariants.size, validatedData.size) : sql`true`,
+                  validatedData.color ? eq(productVariants.color, validatedData.color) : sql`true`
+                )
+          )
+          .limit(1);
+
+        if (variants.length === 0) {
+          return res.status(404).json({ error: 'Product variant not found' });
+        }
+
+        const variant = variants[0];
+        if (!variant.isActive) return res.status(400).json({ error: 'This variant is not available' });
+        if (variant.stockQuantity <= 0) return res.status(400).json({ error: 'This variant is out of stock' });
+
+        // Store the exact variant and its canonical option values.
+        cartData = {
+          ...validatedData,
+          variantId: variant.id,
+          size: variant.size,
+          color: variant.color,
+        };
+
+        const existingCartItem = await storage.getCartItemByProduct(
+          userId,
+          userId ? null : sessionId,
+          validatedData.productId,
+          variant.size || null,
+          variant.color || null,
+          variant.id
+        );
+        const currentCartQuantity = existingCartItem?.quantity || 0;
+        const requestedTotal = currentCartQuantity + (validatedData.quantity || 1);
+
+        if (variant.stockQuantity < requestedTotal) {
+          return res.status(400).json({
+            error: currentCartQuantity > 0
+              ? `Maximum quantity reached. You already have ${currentCartQuantity} in your cart and only ${variant.stockQuantity} are available.`
+              : 'Insufficient stock',
+            availableStock: variant.stockQuantity,
+            currentCartQuantity,
+            requestedTotal
+          });
+        }
+
+        console.log(`✅ Variant stock check passed: ${variant.stockQuantity} available, cart quantity: ${currentCartQuantity}, requested total: ${requestedTotal}`);
+      } else {
+        // Fallback to product-level stock check if no variant specified
+        if (product.inStock <= 0) {
+          return res.status(400).json({ error: 'Product out of stock' });
+        }
+
+        if (product.inStock < (validatedData.quantity || 1)) {
+          return res.status(400).json({
+            error: 'Insufficient stock',
+            availableStock: product.inStock
+          });
+        }
       }
 
       // Use upsertCartItem for better persistence handling
-      const cartItem = await storage.upsertCartItem(validatedData);
+      const cartItem = await storage.upsertCartItem(cartData);
       res.status(201).json(cartItem);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -2158,6 +2477,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (quantity === 0) {
         await storage.removeFromCart(req.params.id);
         return res.json({ message: 'Item removed from cart' });
+      }
+
+      // Validate the cart item's exact variant stock before changing quantity.
+      const cartItemsForUser = await storage.getCartItems(req.headers['x-session-id'] as string || req.sessionID || 'anonymous', userId || undefined);
+      const targetItem = cartItemsForUser.find(item => item.id === req.params.id);
+      if (!targetItem) {
+        return res.status(404).json({ error: 'Cart item not found' });
+      }
+
+      if (targetItem.variantId || targetItem.size || targetItem.color) {
+        const variants = await db
+          .select()
+          .from(productVariants)
+          .where(
+            targetItem.variantId
+              ? and(eq(productVariants.id, targetItem.variantId), eq(productVariants.productId, targetItem.productId))
+              : and(
+                  eq(productVariants.productId, targetItem.productId),
+                  targetItem.size ? eq(productVariants.size, targetItem.size) : sql`${productVariants.size} IS NULL`,
+                  targetItem.color ? eq(productVariants.color, targetItem.color) : sql`${productVariants.color} IS NULL`
+                )
+          )
+          .limit(1);
+        const variant = variants[0];
+        if (!variant || !variant.isActive) {
+          return res.status(400).json({ error: 'This product variant is no longer available' });
+        }
+        if (quantity > variant.stockQuantity) {
+          return res.status(400).json({
+            error: `Only ${variant.stockQuantity} units are available for this variant`,
+            availableStock: variant.stockQuantity
+          });
+        }
+      } else {
+        const product = await storage.getProduct(targetItem.productId);
+        if (!product || quantity > product.inStock) {
+          return res.status(400).json({
+            error: `Only ${product?.inStock || 0} units are available`,
+            availableStock: product?.inStock || 0
+          });
+        }
       }
 
       const updatedItem = await storage.updateCartItem(req.params.id, quantity);
@@ -2310,7 +2670,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/orders', authenticateToken, async (req, res) => {
     try {
       const authReq = req as AuthenticatedRequest;
-      const { items, customerName, customerEmail, customerPhone, shippingAddress, orderNotes } = req.body;
+      const { items, customerName, customerEmail, customerPhone, shippingAddress, orderNotes, promoCode, paymentMethod } = req.body;
 
       if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'No items in order' });
@@ -2323,6 +2683,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         customerPhone,
         shippingAddress,
         notes: orderNotes || null,
+        promoCode: promoCode || null,
+        paymentMethod: paymentMethod || 'razorpay',
         userId: authReq.user.id,
         // These will be computed server-side
         subtotal: '0',
@@ -2369,7 +2731,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error('Error creating order:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to create order';
-      res.status(500).json({ error: errorMessage });
+      const clientError = /promotion|Cash on Delivery|unavailable|expired|Invalid/i.test(errorMessage);
+      res.status(clientError ? 400 : 500).json({ error: errorMessage });
     }
   });
 
@@ -2411,6 +2774,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Error fetching order:', error);
       res.status(500).json({ error: 'Failed to fetch order' });
     }
+  });
+
+  // GST-friendly invoice. It is intentionally HTML/print-ready so it works without adding a PDF runtime dependency.
+  app.get('/api/orders/:id/invoice', authenticateToken, async (req, res) => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const order = await storage.getOrderWithItems(req.params.id);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+      if (order.userId !== authReq.user.id && authReq.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+      const invoiceNumber = order.invoiceNumber || `BMAA-${new Date(order.createdAt || Date.now()).getFullYear()}-${order.id.slice(-8).toUpperCase()}`;
+      if (!order.invoiceNumber) await db.update(ordersTable).set({ invoiceNumber }).where(eq(ordersTable.id, order.id));
+      const businessName = process.env.BUSINESS_NAME || 'BMAA Fashion';
+      const gstin = process.env.BUSINESS_GSTIN || 'GSTIN not configured';
+      const businessAddress = process.env.BUSINESS_ADDRESS || 'Business address not configured';
+      const itemRows = (order.items || []).map((item: any) => `<tr><td>${escapeHtml(item.productName)}</td><td>${escapeHtml(item.size || '-')}</td><td>${escapeHtml(item.color || '-')}</td><td>${item.quantity}</td><td>₹${Number(item.productPrice).toFixed(2)}</td><td>₹${Number(item.totalPrice).toFixed(2)}</td></tr>`).join('');
+      const invoiceHTML = `<!doctype html><html><head><meta charset="utf-8"><title>${invoiceNumber}</title><style>body{font-family:Arial,sans-serif;margin:0;padding:32px;color:#222}.invoice{max-width:900px;margin:auto}.top{display:flex;justify-content:space-between;border-bottom:2px solid #222;padding-bottom:16px}.muted{color:#666;font-size:12px}table{width:100%;border-collapse:collapse;margin-top:24px}th,td{border:1px solid #ddd;padding:9px;text-align:left;font-size:12px}th{background:#f5f5f5}.totals{margin-left:auto;margin-top:20px;width:320px}.row{display:flex;justify-content:space-between;padding:5px}.grand{font-size:18px;font-weight:bold;border-top:2px solid #222;margin-top:5px;padding-top:8px}@media print{body{padding:0}.print{display:none}}</style></head><body><div class="invoice"><div class="top"><div><h1>${escapeHtml(businessName)}</h1><div class="muted">${escapeHtml(businessAddress)}</div><div class="muted">GSTIN: ${escapeHtml(gstin)}</div></div><div><h2>TAX INVOICE</h2><div>Invoice: ${escapeHtml(invoiceNumber)}</div><div>Date: ${new Date(order.createdAt || Date.now()).toLocaleDateString('en-IN')}</div><div>Order: ${escapeHtml(order.id)}</div></div></div><h3>Bill To / Ship To</h3><div class="muted">${escapeHtml(order.customerName)}<br>${escapeHtml(order.customerEmail)}<br>${escapeHtml(order.shippingAddress)}</div><table><thead><tr><th>Product</th><th>Size</th><th>Color</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr></thead><tbody>${itemRows}</tbody></table><div class="totals"><div class="row"><span>Subtotal</span><span>₹${Number(order.subtotal).toFixed(2)}</span></div><div class="row"><span>Shipping</span><span>₹${Number(order.shippingCost || 0).toFixed(2)}</span></div><div class="row"><span>GST / Tax</span><span>₹${Number(order.taxAmount || 0).toFixed(2)}</span></div><div class="row grand"><span>Total</span><span>₹${Number(order.total).toFixed(2)}</span></div></div><p class="muted">Payment status: ${escapeHtml(order.paymentStatus || 'pending')} · Payment method: ${escapeHtml(order.paymentMethod || '-')}</p><button class="print" onclick="window.print()">Print / Save as PDF</button></div></body></html>`;
+      res.type('html').send(invoiceHTML);
+    } catch (error) { console.error('Invoice generation failed:', error); res.status(500).json({ error: 'Failed to generate invoice' }); }
   });
 
   // Generate and download receipt for an order
@@ -2515,7 +2896,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <div class="totals">
       <div class="total-row">
         <span>Subtotal:</span>
-        <span>₹${Number(order.total).toFixed(2)}</span>
+        <span>₹${Number(order.subtotal).toFixed(2)}</span>
       </div>
       <div class="total-row">
         <span>Shipping:</span>
@@ -2547,35 +2928,133 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update order status (for admin or order tracking)
+  // Customer status changes are intentionally limited. Customers may only request cancellation;
+  // fulfillment statuses (processing/shipped/delivered) are controlled by admins.
   app.patch('/api/orders/:id/status', authenticateToken, async (req, res) => {
     try {
       const authReq = req as AuthenticatedRequest;
       const { status } = req.body;
 
-      if (!status) {
-        return res.status(400).json({ error: 'Status is required' });
+      if (status !== 'cancelled') {
+        return res.status(403).json({ error: 'Customers cannot change fulfillment status' });
       }
 
-      // Verify order exists and user owns it
       const order = await storage.getOrder(req.params.id);
-      if (!order) {
-        return res.status(404).json({ error: 'Order not found' });
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+      if (order.userId !== authReq.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (['shipped', 'delivered', 'cancelled'].includes(order.status)) {
+        return res.status(400).json({ error: `Order cannot be cancelled from status: ${order.status}` });
       }
 
-      if (order.userId !== authReq.user.id) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-
-      const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
-      if (!validStatuses.includes(status)) {
-        return res.status(400).json({ error: 'Invalid status' });
-      }
-
-      const updatedOrder = await storage.updateOrderStatus(req.params.id, status);
+      const updatedOrder = await storage.cancelOrderByCustomer(req.params.id, authReq.user.id, 'Cancelled by customer');
+      if (!updatedOrder) return res.status(400).json({ error: 'Order could not be cancelled' });
       res.json(updatedOrder);
     } catch (error) {
-      console.error('Error updating order status:', error);
-      res.status(500).json({ error: 'Failed to update order status' });
+      console.error('Error cancelling order:', error);
+      res.status(500).json({ error: 'Failed to cancel order' });
+    }
+  });
+
+  // Customer order status history.
+  app.get('/api/orders/:id/status-history', authenticateToken, async (req, res) => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const order = await storage.getOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+      if (order.userId !== authReq.user.id) return res.status(403).json({ error: 'Access denied' });
+      res.json(await storage.getOrderStatusHistory(req.params.id));
+    } catch (error) {
+      console.error('Error fetching order status history:', error);
+      res.status(500).json({ error: 'Failed to fetch order status history' });
+    }
+  });
+
+  // Product waitlist
+  app.post('/api/waitlist', async (req, res) => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+      const productId = typeof req.body?.productId === 'string' ? req.body.productId : '';
+      if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Valid email is required' });
+      const product = await storage.getProduct(productId);
+      if (!product) return res.status(404).json({ error: 'Product not found' });
+      const entry = await storage.createWaitlistEntry({ email, productId, userId: authReq.user?.id || undefined, notifyWhenAvailable: req.body?.notifyWhenAvailable !== false });
+      res.status(201).json(entry);
+    } catch (error) { console.error('Waitlist signup failed:', error); res.status(500).json({ error: 'Failed to join waitlist' }); }
+  });
+
+  app.get('/api/admin/waitlist', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    const entries = await storage.getWaitlistEntries(typeof req.query.productId === 'string' ? req.query.productId : undefined);
+    res.json(entries);
+  });
+
+  app.delete('/api/admin/waitlist/:id', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    await storage.removeWaitlistEntry(req.params.id);
+    res.status(204).send();
+  });
+
+  // Customer cancellation endpoint used by Order Detail.
+  app.post('/api/orders/:id/cancel', authenticateToken, async (req, res) => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const order = await storage.getOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+      if (order.userId !== authReq.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (['shipped', 'delivered', 'cancelled'].includes(order.status)) {
+        return res.status(400).json({ error: 'This order can no longer be cancelled' });
+      }
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 500) : '';
+      const updatedOrder = await storage.cancelOrderByCustomer(req.params.id, authReq.user.id, reason || 'Cancelled by customer');
+      if (!updatedOrder) return res.status(400).json({ error: 'Order could not be cancelled' });
+      res.json(updatedOrder);
+    } catch (error) {
+      console.error('Error cancelling order:', error);
+      res.status(500).json({ error: 'Failed to cancel order' });
+    }
+  });
+
+  // Return requests are represented as support tickets so they enter the existing admin support workflow.
+  app.post('/api/orders/:id/return', authenticateToken, async (req, res) => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const order = await storage.getOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+      if (order.userId !== authReq.user.id) return res.status(403).json({ error: 'Access denied' });
+      if (order.status !== 'delivered') return res.status(400).json({ error: 'Returns can only be requested after delivery' });
+
+      const items = Array.isArray(req.body?.items) ? req.body.items.join(', ') : 'All eligible items';
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : 'Return requested';
+      const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim() : '';
+      const ticket = await storage.createSupportTicket({
+        userId: authReq.user.id,
+        customerEmail: order.customerEmail,
+        customerName: order.customerName,
+        subject: `Return request - Order #${order.id.slice(-8).toUpperCase()}`,
+        category: 'Return Request',
+        message: `Order: ${order.id}\nItems: ${items}\nReason: ${reason}\nNotes: ${notes}`.trim(),
+        status: 'open',
+        priority: 'normal'
+      });
+      res.status(201).json({ success: true, ticket });
+    } catch (error) {
+      console.error('Error creating return request:', error);
+      res.status(500).json({ error: 'Failed to submit return request' });
+    }
+  });
+
+  // Backward-compatible account deletion endpoint used by the current Profile UI.
+  app.delete('/api/user/account', authenticateToken, async (req, res) => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const password = typeof req.body?.password === 'string' ? req.body.password : '';
+      if (!password) return res.status(400).json({ message: 'Password is required' });
+      // Reuse the same secure deletion implementation exposed by /api/auth/account.
+      const success = await storage.deleteUserAccount(authReq.user.id, password);
+      if (!success) return res.status(400).json({ message: 'Incorrect password or account could not be deleted' });
+      res.json({ success: true, message: 'Account deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting account:', error);
+      res.status(500).json({ message: 'Failed to delete account' });
     }
   });
 
@@ -2706,6 +3185,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "pending",
         paymentStatus: "pending",
         notes: guestData.orderNotes || null,
+        promoCode: guestData.promoCode || null,
+        giftCardCode: guestData.giftCardCode || null,
+        loyaltyPointsRedeemed: guestData.loyaltyPointsRedeemed || 0,
+        paymentMethod: guestData.paymentMethod || 'razorpay',
       };
 
       // Use SECURE order creation that validates prices from database
@@ -2739,7 +3222,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error('Error processing guest checkout:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to process guest checkout';
-      res.status(500).json({ error: errorMessage });
+      const clientError = /promotion|Cash on Delivery|unavailable|expired|Invalid/i.test(errorMessage);
+      res.status(clientError ? 400 : 500).json({ error: errorMessage });
     }
   });
 
@@ -3956,7 +4440,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Generate filename with timestamp and analytics type
       const timestamp = new Date().toISOString().split('T')[0];
-      const filename = validatedData.fileName || `analytics-export-${validatedData.analyticsType}-${timestamp}.csv`;
+      const filename = validatedData.fileName || `analytics-export-${validatedData.metrics.join("-")}-${timestamp}.csv`;
 
       // Set CSV headers
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -4279,7 +4763,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const newTemplate = await storage.createMessageTemplate({
         ...templateData,
-        createdBy: authReq.user.id,
       });
 
       console.log(`✅ Message template created with ID: ${newTemplate.id}`);
@@ -4461,6 +4944,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Backward-compatible notification endpoints used by the current Admin Notifications UI
+  app.get('/api/admin/notifications', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    res.json(await storage.getNotificationHistory(req.query));
+  });
+  app.get('/api/admin/notifications/recipient-groups', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    const groups = await storage.getRecipientGroups();
+    if (groups.length) return res.json(groups);
+    const authReq = req as AuthenticatedRequest;
+    const group = await storage.createRecipientGroup({ name: 'All Customers', description: 'All registered customer accounts', criteria: { role: 'user' }, createdBy: authReq.user.id, isActive: true });
+    res.json([group]);
+  });
+  app.post('/api/admin/notifications/send-bulk', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const request = bulkNotificationRequestSchema.parse(req.body);
+      res.status(202).json(await storage.sendBulkNotifications(request, authReq.user.id));
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: 'VALIDATION_ERROR', details: error.errors });
+      res.status(500).json({ error: 'BULK_NOTIFICATION_ERROR', message: error instanceof Error ? error.message : 'Failed to send bulk notification' });
+    }
+  });
+  app.post('/api/admin/notifications/:id/retry', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    const result = await storage.retryNotification(req.params.id);
+    if (!result) return res.status(404).json({ error: 'NOTIFICATION_NOT_FOUND' });
+    res.json(result);
+  });
+
   // POST /api/admin/notifications/bulk - Send bulk notifications
   app.post('/api/admin/notifications/bulk', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
     try {
@@ -4469,7 +4979,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`📢 Bulk notification requested by admin: ${authReq.user.email} to ${bulkRequest.channels.join(', ')}`);
 
-      const result = await storage.sendBulkNotifications(bulkRequest);
+      const result = await storage.sendBulkNotifications(bulkRequest, authReq.user.id);
 
       console.log(`✅ Bulk notification queued - ID: ${result.id}, Recipients: ${result.recipientCount}`);
       res.status(202).json(result);
@@ -4532,6 +5042,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create Razorpay order
+  // Admin-only Razorpay refund. The order is marked refunded only after Razorpay confirms success.
+  app.post('/api/admin/orders/:id/refund', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    try {
+      const order = await storage.getOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: 'Order not found' });
+      if (order.paymentMethod !== 'razorpay' || !order.razorpayPaymentId) return res.status(400).json({ error: 'This order does not have a refundable Razorpay payment' });
+      if (order.paymentStatus !== 'completed') return res.status(400).json({ error: 'Only completed payments can be refunded' });
+      if (order.status === 'refunded') return res.status(409).json({ error: 'Order is already refunded' });
+
+      const requestedAmount = req.body?.amount;
+      const total = Number(order.total);
+      const amount = requestedAmount == null ? total : Number(requestedAmount);
+      if (!Number.isFinite(amount) || amount <= 0 || amount > total) return res.status(400).json({ error: 'Invalid refund amount' });
+
+      const refund = await razorpay.payments.refund(order.razorpayPaymentId, { amount: Math.round(amount * 100) });
+      await storage.updateOrderStatus(order.id, 'refunded');
+      const updated = await storage.updateOrderPaymentStatus(order.id, 'refunded');
+      res.json({ success: true, refund, order: updated });
+    } catch (error) {
+      console.error('Razorpay refund failed:', error);
+      res.status(502).json({ error: 'Refund failed', message: error instanceof Error ? error.message : 'Razorpay refund failed' });
+    }
+  });
+
   app.post('/api/payments/create-razorpay-order', authenticateToken, async (req, res) => {
     try {
       const authReq = req as AuthenticatedRequest;
@@ -4762,6 +5296,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.updateOrderStatus(orderId, 'processing');
       await storage.updateOrderPaymentStatus(orderId, 'completed');
+      await awardLoyaltyForCompletedOrder(await storage.getOrder(orderId) as any);
 
       // Trigger payment confirmation email for guest order
       try {
@@ -4900,6 +5435,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await storage.updateOrderStatus(orderId, 'processing');
       await storage.updateOrderPaymentStatus(orderId, 'completed');
+      await awardLoyaltyForCompletedOrder(await storage.getOrder(orderId) as any);
 
       // Trigger payment confirmation email for authenticated user
       try {
@@ -5005,12 +5541,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.updateWhatsappDeliveryStatus(MessageSid, {
           status: MessageStatus.toLowerCase(),
           phoneNumber: To,
-          from: From,
           errorCode: ErrorCode,
           errorMessage: ErrorMessage,
-          channelMessageSid: ChannelMessageSid,
-          smsSid: SmsSid,
-          statusUpdatedAt: new Date()
+          webhookData: { From, ChannelMessageSid, SmsSid, statusUpdatedAt: new Date().toISOString() }
         });
 
         console.log(`✅ WhatsApp status updated: ${MessageSid} -> ${MessageStatus}`);
@@ -5028,8 +5561,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           direction: 'outbound',
           errorCode: ErrorCode,
           errorMessage: ErrorMessage,
-          channelMessageSid: ChannelMessageSid,
-          smsSid: SmsSid
+          webhookData: { From, ChannelMessageSid, SmsSid }
         });
       } catch (logError) {
         console.error('❌ Failed to create WhatsApp delivery log:', logError);
@@ -5074,12 +5606,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           phoneNumber: From,
           status: 'received',
           direction: 'inbound',
-          messageBody: Body,
           numMedia: NumMedia ? parseInt(NumMedia) : 0,
-          mediaUrl: MediaUrl0,
           mediaType: MediaContentType0,
-          profileName: ProfileName,
-          waId: WaId
+          webhookData: { Body, MediaUrl0, ProfileName, WaId }
         });
 
         console.log(`📥 WhatsApp message received from ${From}: ${Body.substring(0, 50)}...`);
@@ -5218,7 +5747,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Policies
     policies: z.object({
       shipping: z.object({
-        freeThreshold: z.number().optional(),
+        freeThreshold: z.number().min(0).optional(),
+        shippingCost: z.number().min(0).optional(),
         deliveryDays: z.string().optional(),
         text: z.string().optional(),
       }).optional(),
@@ -5256,6 +5786,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       id: z.string(),
       message: z.string(),
       code: z.string().optional(),
+      discountType: z.enum(["percentage", "fixed"]).optional(),
+      discountValue: z.number().min(0).optional(),
       expiry: z.string().optional(),
       active: z.boolean(),
       bgColor: z.string().optional(),

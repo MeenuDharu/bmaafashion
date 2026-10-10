@@ -20,7 +20,7 @@ if (!process.env.DATABASE_URL) {
 }
 
 let pool: any;
-let db: any;
+let db: ReturnType<typeof drizzleNeon>;
 
 if (isReplit) {
   neonConfig.webSocketConstructor = ws;

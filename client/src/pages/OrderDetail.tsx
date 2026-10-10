@@ -107,7 +107,7 @@ function OrderDetailContent() {
   // Return request mutation
   const returnMutation = useMutation({
     mutationFn: async (data: { items: string[]; reason: string; notes: string }) => {
-      const response = await authenticatedFetch(`/api/orders/${orderId}/return`, {
+      const response = await authenticatedFetch(`/api/returns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),

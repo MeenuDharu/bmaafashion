@@ -40,7 +40,7 @@ export default function Products({ onAddToCart, onViewProductDetails }: Products
     onViewProductDetails(productId);
   };
 
-  const { pageBanners } = useSiteSettings();
+  const { pageBanners, seoSettings } = useSiteSettings();
   const banner = pageBanners?.products;
   const bannerTitle = banner?.title || "Fashion Collections";
   const bannerSubtitle = banner?.subtitle || "Browse our complete collection of premium fashion wear and accessories.";
@@ -60,8 +60,8 @@ export default function Products({ onAddToCart, onViewProductDetails }: Products
   ], []);
 
   useSEO({
-    title: "Buy Fashion Collections Online | Bmaafashion",
-    description: "Shop premium dress collections online at Bmaafashion. Exclusive designs, quality fabrics, and trendy styles for every occasion.",
+    title: seoSettings?.products?.title || "Buy Fashion Collections Online | Bmaafashion",
+    description: seoSettings?.products?.description || "Shop premium dress collections online at Bmaafashion. Exclusive designs, quality fabrics, and trendy styles for every occasion.",
     ogTitle: "Shop Dress Collections - Bmaafashion",
     ogDescription: "Discover Bmaafashion's exclusive dress collections. From casual to formal wear, find the perfect style for every occasion with premium quality fabrics.",
     ogImage: "/attached_assets/bmaafashion.jpeg",
@@ -78,6 +78,10 @@ export default function Products({ onAddToCart, onViewProductDetails }: Products
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedMainCategory, setSelectedMainCategory] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>(productSettings?.defaultSort ?? "featured");
+
+  useEffect(() => {
+    if (productSettings?.defaultSort) setSortBy(productSettings.defaultSort);
+  }, [productSettings?.defaultSort]);
   const [currentPage, setCurrentPage] = useState(1);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [gridColumns, setGridColumns] = useState<1 | 2 | 3 | 4>(4);

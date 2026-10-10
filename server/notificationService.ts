@@ -148,21 +148,21 @@ export class NotificationService {
           // Check specific SMS preferences
           switch (smsType) {
             case SmsType.ORDER_CONFIRMATION:
-              return userPrefs.smsNotifications.orderUpdates;
+              return (userPrefs.smsNotifications.orderUpdates ?? true);
             case SmsType.ORDER_STATUS_UPDATE:
-              return userPrefs.smsNotifications.orderUpdates;
+              return (userPrefs.smsNotifications.orderUpdates ?? true);
             case SmsType.PAYMENT_CONFIRMATION:
-              return userPrefs.smsNotifications.paymentConfirmations;
+              return (userPrefs.smsNotifications.paymentConfirmations ?? true);
             case SmsType.PAYMENT_FAILED:
-              return userPrefs.smsNotifications.paymentConfirmations; // Use same setting
+              return (userPrefs.smsNotifications.paymentConfirmations ?? true); // Use same setting
             case SmsType.SHIPPING_NOTIFICATION:
-              return userPrefs.smsNotifications.shippingNotifications;
+              return (userPrefs.smsNotifications.shippingNotifications ?? true);
             case SmsType.DELIVERY_NOTIFICATION:
-              return userPrefs.smsNotifications.accountNotifications;
+              return (userPrefs.smsNotifications.accountNotifications ?? true);
             case SmsType.ORDER_CANCELLATION:
-              return userPrefs.smsNotifications.orderUpdates; // Use order updates setting
+              return (userPrefs.smsNotifications.orderUpdates ?? true); // Use order updates setting
             case SmsType.PROMOTIONAL:
-              return userPrefs.smsNotifications.promotionalOffers;
+              return (userPrefs.smsNotifications.promotionalOffers ?? true);
             default:
               return true; // Default to allow for other types
           }
@@ -203,25 +203,25 @@ export class NotificationService {
           // Check specific WhatsApp preferences
           switch (whatsappType) {
             case WhatsappType.ORDER_CONFIRMATION:
-              return userPrefs.whatsappNotifications.orderConfirmation;
+              return (userPrefs.whatsappNotifications.orderConfirmation ?? true);
             case WhatsappType.ORDER_STATUS_UPDATE:
-              return userPrefs.whatsappNotifications.orderUpdates;
+              return (userPrefs.whatsappNotifications.orderUpdates ?? true);
             case WhatsappType.PAYMENT_CONFIRMATION:
-              return userPrefs.whatsappNotifications.paymentConfirmations;
+              return (userPrefs.whatsappNotifications.paymentConfirmations ?? true);
             case WhatsappType.PAYMENT_FAILED:
-              return userPrefs.whatsappNotifications.paymentConfirmations; // Use same setting
+              return (userPrefs.whatsappNotifications.paymentConfirmations ?? true); // Use same setting
             case WhatsappType.SHIPPING_NOTIFICATION:
-              return userPrefs.whatsappNotifications.shippingNotifications;
+              return (userPrefs.whatsappNotifications.shippingNotifications ?? true);
             case WhatsappType.DELIVERY_NOTIFICATION:
-              return userPrefs.whatsappNotifications.deliveryNotifications;
+              return (userPrefs.whatsappNotifications.deliveryNotifications ?? true);
             case WhatsappType.ORDER_CANCELLATION:
-              return userPrefs.whatsappNotifications.orderUpdates; // Use order updates setting
+              return (userPrefs.whatsappNotifications.orderUpdates ?? true); // Use order updates setting
             case WhatsappType.PROMOTIONAL:
-              return userPrefs.whatsappNotifications.promotionalMessages;
+              return (userPrefs.whatsappNotifications.promotionalMessages ?? true);
             case WhatsappType.STOCK_ALERT:
-              return userPrefs.whatsappNotifications.stockAlerts;
+              return (userPrefs.whatsappNotifications.stockAlerts ?? true);
             case WhatsappType.ACCOUNT_WELCOME:
-              return userPrefs.whatsappNotifications.accountNotifications;
+              return (userPrefs.whatsappNotifications.accountNotifications ?? true);
             default:
               return true; // Default to allow for other types
           }
@@ -621,7 +621,7 @@ export class NotificationService {
         // Create notification record
         await this.createNotificationRecord(
           orderUserId,
-          EmailType.PAYMENT_FAILURE,
+          EmailType.PAYMENT_FAILED,
           `Payment Failed #${order.id.slice(-8).toUpperCase()}`,
           `Payment failed for your order. ${failureReason ? `Reason: ${failureReason}` : 'Please try again or contact support.'}`,
           { 
@@ -1142,7 +1142,7 @@ export class NotificationService {
       // Get notifications within timeframe
       const notifications = await storage.getNotifications();
       const filteredNotifications = notifications.filter(
-        n => new Date(n.createdAt) >= startDate
+        n => !!n.createdAt && new Date(n.createdAt) >= startDate
       );
 
       // Calculate stats

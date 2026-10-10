@@ -91,6 +91,7 @@ export const products = pgTable("products", {
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   unit: text("unit").notNull().default("per unit"), // per piece, per bunch, per 50g, per 100g, per 250g, per 500g, per kg, per tray, per pack, per bag, per unit
   size: text("size"), // Size field for clothing/fashion items (e.g., S, M, L, XL or 32, 34, 36)
+  colors: text("colors"),
   mainCategory: text("main_category").notNull().default("Kits"), // Fresh Produce or Kits
   category: text("category").notNull(),
   images: text("images").array().default([]).notNull(),
@@ -105,10 +106,45 @@ export const products = pgTable("products", {
   maxStock: integer("max_stock").notNull().default(100),
   sku: text("sku"),
   supplier: text("supplier"),
+  shippingChargeApplicable: boolean("shipping_charge_applicable").notNull().default(false),
+  shippingCharge: decimal("shipping_charge", { precision: 10, scale: 2 }).default("0"),
   costPrice: decimal("cost_price", { precision: 10, scale: 2 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+// Product variants for color and size combinations
+export const productVariants = pgTable("product_variants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  sku: text("sku").unique(),
+  color: text("color"),
+  size: text("size"),
+  price: decimal("price", { precision: 10, scale: 2 }),
+  compareAtPrice: decimal("compare_at_price", { precision: 10, scale: 2 }), // Original price for showing discounts
+  stockQuantity: integer("stock_quantity").notNull().default(0),
+  lowStockThreshold: integer("low_stock_threshold").default(5),
+  weight: decimal("weight", { precision: 10, scale: 2 }), // For shipping calculations
+  shippingChargeApplicable: boolean("shipping_charge_applicable").notNull().default(false),
+  shippingCharge: decimal("shipping_charge", { precision: 10, scale: 2 }).default("0"), // Per-unit product shipping charge
+  images: text("images").array().default([]), // Variant-specific images
+  isActive: boolean("is_active").default(true),
+  sortOrder: integer("sort_order").default(0), // For display ordering
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  index("idx_product_variants_product_id").on(table.productId),
+  index("idx_product_variants_sku").on(table.sku),
+  index("idx_product_variants_color").on(table.color),
+  index("idx_product_variants_size").on(table.size),
+  index("idx_product_variants_is_active").on(table.isActive),
+  // Unique constraint for color-size combination per product
+  uniqueIndex("unique_product_color_size").on(
+    table.productId,
+    sql`COALESCE(${table.color}, '')`,
+    sql`COALESCE(${table.size}, '')`
+  ),
+]);
 
 // Bulk operations tracking for inventory management
 export const bulkOperations = pgTable("bulk_operations", {
@@ -208,12 +244,28 @@ export const reviewHelpfulVotes = pgTable("review_helpful_votes", {
   index("idx_review_helpful_votes_user_id").on(table.userId),
 ]);
 
+export const waitlistEntries = pgTable("waitlist_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: varchar("email").notNull(),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  notifyWhenAvailable: boolean("notify_when_available").notNull().default(true),
+  notifiedAt: timestamp("notified_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  uniqueIndex("unique_waitlist_email_product").on(table.email, table.productId),
+  index("idx_waitlist_product_id").on(table.productId),
+  index("idx_waitlist_email").on(table.email),
+]);
+
 export const cartItems = pgTable("cart_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }),
   productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  variantId: varchar("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
   quantity: integer("quantity").notNull().default(1),
   size: text("size"), // Product size (e.g., S, M, L, XL, etc.)
+  color: text("color"),
   sessionId: text("session_id"), // For guest users
   addedAt: timestamp("added_at").defaultNow(), // When item was first added
   updatedAt: timestamp("updated_at").defaultNow(), // Last modification time
@@ -221,13 +273,24 @@ export const cartItems = pgTable("cart_items", {
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => [
   // Unique constraints to prevent duplicate cart items
-  uniqueIndex("unique_user_product_cart").on(table.userId, table.productId).where(sql`user_id IS NOT NULL`),
-  uniqueIndex("unique_session_product_cart").on(table.sessionId, table.productId).where(sql`session_id IS NOT NULL AND user_id IS NULL`),
+  uniqueIndex("unique_user_product_variant_cart").on(
+    table.userId,
+    table.productId,
+    sql`COALESCE(${table.size}, '')`,
+    sql`COALESCE(${table.color}, '')`
+  ).where(sql`user_id IS NOT NULL`),
+  uniqueIndex("unique_session_product_variant_cart").on(
+    table.sessionId,
+    table.productId,
+    sql`COALESCE(${table.size}, '')`,
+    sql`COALESCE(${table.color}, '')`
+  ).where(sql`session_id IS NOT NULL AND user_id IS NULL`),
   
   // Indexes for efficient cart queries
   index("idx_cart_items_user_id").on(table.userId),
   index("idx_cart_items_session_id").on(table.sessionId),
   index("idx_cart_items_product_id").on(table.productId),
+  index("idx_cart_items_variant_id").on(table.variantId),
   index("idx_cart_items_expires_at").on(table.expiresAt), // For cleanup operations
   index("idx_cart_items_updated_at").on(table.updatedAt), // For sync operations
   
@@ -255,6 +318,13 @@ export const orders = pgTable("orders", {
   razorpaySignature: text("razorpay_signature"),
   paymentMethod: text("payment_method"), // razorpay, cod, etc.
   trackingNumber: text("tracking_number"),
+  trackingUrl: text("tracking_url"),
+  courierName: text("courier_name"),
+  invoiceNumber: text("invoice_number").unique(),
+  couponDiscount: decimal("coupon_discount", { precision: 10, scale: 2 }).default("0"),
+  giftCardDiscount: decimal("gift_card_discount", { precision: 10, scale: 2 }).default("0"),
+  loyaltyPointsRedeemed: integer("loyalty_points_redeemed").default(0),
+  referralCode: text("referral_code"),
   estimatedDelivery: timestamp("estimated_delivery"),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -293,11 +363,16 @@ export const orderItems = pgTable("order_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderId: varchar("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
   productId: varchar("product_id").notNull().references(() => products.id),
+  variantId: varchar("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
   productName: text("product_name").notNull(), // Snapshot at time of order
   productPrice: decimal("product_price", { precision: 10, scale: 2 }).notNull(),
   quantity: integer("quantity").notNull(),
+  size: text("size"), // Product variant size at time of order
+  color: text("color"), // Product variant color at time of order
   totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
-});
+}, (table) => [
+  index("idx_order_items_variant_id").on(table.variantId),
+]);
 
 // Support tickets
 export const supportTickets = pgTable("support_tickets", {
@@ -312,6 +387,7 @@ export const supportTickets = pgTable("support_tickets", {
   priority: text("priority").default("normal"), // low, normal, high, urgent
   assignedTo: text("assigned_to"),
   response: text("response"),
+  orderId: varchar("order_id").references(() => orders.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -666,7 +742,7 @@ export const siteSettings = pgTable("site_settings", {
   }>>(),
   // Policies
   policies: jsonb("policies").$type<{
-    shipping?: { freeThreshold?: number; deliveryDays?: string; text?: string; };
+    shipping?: { freeThreshold?: number; shippingCost?: number; deliveryDays?: string; text?: string; };
     returns?: { windowDays?: number; text?: string; };
     gst?: { rate?: number; text?: string; };
   }>(),
@@ -688,7 +764,7 @@ export const siteSettings = pgTable("site_settings", {
   }>(),
   // Promotions
   promotions: jsonb("promotions").$type<Array<{
-    id: string; message: string; code?: string; expiry?: string; active: boolean; bgColor?: string; textColor?: string;
+    id: string; message: string; code?: string; discountType?: "percentage" | "fixed"; discountValue?: number; expiry?: string; active: boolean; bgColor?: string; textColor?: string;
   }>>(),
   // Footer
   footerSettings: jsonb("footer_settings").$type<{
@@ -754,13 +830,13 @@ export const siteSettings = pgTable("site_settings", {
 export const userPreferences = pgTable("user_preferences", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
-  emailNotifications: jsonb("email_notifications").default({
+  emailNotifications: jsonb("email_notifications").$type<{ orderUpdates?: boolean; promotions?: boolean; stockAlerts?: boolean; newsletter?: boolean; }>().default({
     orderUpdates: true,
     promotions: true,
     stockAlerts: false,
     newsletter: false,
   }),
-  smsNotifications: jsonb("sms_notifications").default({
+  smsNotifications: jsonb("sms_notifications").$type<{ enabled?: boolean; orderConfirmation?: boolean; orderUpdates?: boolean; paymentConfirmation?: boolean; paymentConfirmations?: boolean; shippingUpdates?: boolean; shippingNotifications?: boolean; deliveryNotifications?: boolean; promotional?: boolean; promotionalOffers?: boolean; stockAlerts?: boolean; accountNotifications?: boolean; }>().default({
     orderUpdates: true,
     shippingNotifications: true,
     paymentConfirmations: true,
@@ -768,7 +844,7 @@ export const userPreferences = pgTable("user_preferences", {
     stockAlerts: false,
     accountNotifications: true,
   }),
-  whatsappNotifications: jsonb("whatsapp_notifications").default({
+  whatsappNotifications: jsonb("whatsapp_notifications").$type<{ isOptedIn?: boolean; orderConfirmation?: boolean; orderUpdates?: boolean; shippingNotifications?: boolean; paymentConfirmations?: boolean; deliveryNotifications?: boolean; stockAlerts?: boolean; promotionalMessages?: boolean; accountNotifications?: boolean; }>().default({
     orderConfirmation: true,
     orderUpdates: true,
     shippingNotifications: true,
@@ -778,7 +854,7 @@ export const userPreferences = pgTable("user_preferences", {
     promotionalMessages: false,
     accountNotifications: true,
   }),
-  privacySettings: jsonb("privacy_settings").default({
+  privacySettings: jsonb("privacy_settings").$type<{ profileVisibility?: string; showOrderHistory?: boolean; shareActivityData?: boolean; }>().default({
     profileVisibility: "private",
     showOrderHistory: false,
     shareActivityData: false,
@@ -796,6 +872,7 @@ export const userPreferences = pgTable("user_preferences", {
 
 // Type definitions and schemas
 export type Product = typeof products.$inferSelect;
+export type ProductVariant = typeof productVariants.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type UserAddress = typeof userAddresses.$inferSelect;
 export type Wishlist = typeof wishlists.$inferSelect;
@@ -834,6 +911,14 @@ export const insertProductSchema = createInsertSchema(products).omit({
   images: z.array(z.string().min(1, "Image URL cannot be empty")).optional(),
 });
 
+export const insertProductVariantSchema = createInsertSchema(productVariants).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  images: z.array(z.string().min(1, "Image URL cannot be empty")).optional(),
+});
+
 export const insertCategorySchema = createInsertSchema(categories).omit({
   id: true,
   createdAt: true,
@@ -863,6 +948,10 @@ export const insertProductReviewSchema = createInsertSchema(productReviews).omit
 export const insertReviewHelpfulVoteSchema = createInsertSchema(reviewHelpfulVotes).omit({
   id: true,
   createdAt: true,
+});
+
+export const insertWaitlistEntrySchema = createInsertSchema(waitlistEntries).omit({
+  id: true, createdAt: true, notifiedAt: true,
 });
 
 export const insertCartItemSchema = createInsertSchema(cartItems).omit({
@@ -1206,8 +1295,14 @@ export const csvUploadSchema = z.object({
 export const inventoryExportSchema = z.object({
   format: z.enum(['csv', 'xlsx']).default('csv'),
   type: z.enum(['overview', 'audit_trail', 'low_stock_alerts']),
-  filters: z.record(z.any()).optional(), // Applied filters for the export
+  filters: z.record(z.any()).optional(),
   includeMetadata: z.coerce.boolean().default(true),
+  fields: z.array(z.string()).optional(),
+  stockLevel: z.enum(['all', 'in_stock', 'low_stock', 'out_of_stock', 'reorder_point']).optional(),
+  categories: z.array(z.string()).optional(),
+  suppliers: z.array(z.string()).optional(),
+  includePerformanceMetrics: z.boolean().optional(),
+  fileName: z.string().optional(),
 });
 
 // Response schemas for admin inventory endpoints
@@ -1372,9 +1467,16 @@ export const guestCheckoutSchema = z.object({
   billingAddress: guestAddressSchema.optional(),
   useSameAddress: z.boolean().default(true),
   orderNotes: z.string().optional(),
+  promoCode: z.string().trim().max(50).optional(),
+  giftCardCode: z.string().trim().max(64).optional(),
+  loyaltyPointsRedeemed: z.number().int().min(0).optional(),
+  paymentMethod: z.enum(['razorpay', 'cod']).default('razorpay'),
   items: z.array(z.object({
     productId: z.string().uuid("Valid product ID is required"),
+    variantId: z.string().uuid("Valid variant ID is required").nullable().optional(),
     quantity: z.number().int().min(1, "Quantity must be at least 1"),
+    size: z.string().nullable().optional(),
+    color: z.string().nullable().optional(),
     // productName, productPrice, totalPrice calculated server-side for security
   })).min(1, "At least one item is required"),
   // subtotal, shippingCost, taxAmount, total calculated server-side for security
@@ -1394,11 +1496,14 @@ export const createAccountFromGuestSchema = z.object({
 
 // Inferred types
 export type InsertProduct = z.infer<typeof insertProductSchema>;
+export type InsertProductVariant = z.infer<typeof insertProductVariantSchema>;
 export type InsertCategory = z.infer<typeof insertCategorySchema>;
 export type InsertUserAddress = z.infer<typeof insertUserAddressSchema>;
 export type InsertWishlist = z.infer<typeof insertWishlistSchema>;
 export type InsertProductReview = z.infer<typeof insertProductReviewSchema>;
 export type InsertReviewHelpfulVote = z.infer<typeof insertReviewHelpfulVoteSchema>;
+export type InsertWaitlistEntry = z.infer<typeof insertWaitlistEntrySchema>;
+export type WaitlistEntry = typeof waitlistEntries.$inferSelect;
 export type InsertCartItem = z.infer<typeof insertCartItemSchema>;
 export type InsertOrder = z.infer<typeof insertOrderSchema>;
 export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
@@ -2453,6 +2558,7 @@ export const customerExportSchema = z.object({
   ])).default(['email', 'firstName', 'lastName', 'totalOrders', 'lifetimeValue', 'registrationDate']),
   includeAnalytics: z.coerce.boolean().default(true),
   includeOrderHistory: z.coerce.boolean().default(false),
+  fileName: z.string().optional(),
 });
 
 // Insert schemas for customer management tables
@@ -2642,6 +2748,8 @@ export type ExportRequest = z.infer<typeof exportRequestSchema>;
 export type CsvConfig = z.infer<typeof csvConfigSchema>;
 export type ExportStatusUpdate = z.infer<typeof exportStatusUpdateSchema>;
 export type AnalyticsExport = z.infer<typeof analyticsExportSchema>;
+export type OrdersExport = z.infer<typeof ordersExportSchema>;
+export type RevenueExport = z.infer<typeof revenueExportSchema>;
 
 // =============================================================================
 // MESSAGE TEMPLATES SYSTEM
@@ -2881,3 +2989,5 @@ export type CustomerAnalyticsResponse = z.infer<typeof customerAnalyticsResponse
 export type CustomerCommunication = z.infer<typeof customerCommunicationSchema>;
 export type CustomerProfileUpdate = z.infer<typeof customerProfileUpdateSchema>;
 export type CustomerExport = z.infer<typeof customerExportSchema>;
+// Production commerce extensions (kept in a separate module for safe incremental migrations)
+export * from "./commerceFeatures";

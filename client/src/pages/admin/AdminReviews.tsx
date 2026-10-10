@@ -183,7 +183,7 @@ export default function AdminReviews() {
   const getStatusBadge = (review: ReviewWithDetails) => {
     // This would be based on your moderation system
     // For now, we'll use placeholder logic
-    if (review.helpfulVotes !== null && review.helpfulVotes !== undefined && review.helpfulVotes < -5) {
+    if (review.helpfulVotes !== null && review.helpfulVotes !== undefined && (review.helpfulVotes ?? 0) < -5) {
       return <Badge variant="destructive">Flagged</Badge>;
     }
     if (review.isVerifiedPurchase) {
@@ -396,7 +396,7 @@ export default function AdminReviews() {
                           <span className="font-medium">{getUserDisplayName(review.user)}</span>
                           {getStatusBadge(review)}
                           <span className="text-sm text-muted-foreground">
-                            {formatDistanceToNow(new Date(review.createdAt), { addSuffix: true })}
+                            {formatDistanceToNow(new Date(review.createdAt ?? Date.now()), { addSuffix: true })}
                           </span>
                         </div>
                         
@@ -442,12 +442,12 @@ export default function AdminReviews() {
                         size="icon"
                         onClick={() => flagReviewMutation.mutate({ 
                           reviewId: review.id, 
-                          flagged: review.helpfulVotes > -5 
+                          flagged: (review.helpfulVotes ?? 0) > -5 
                         })}
                         disabled={flagReviewMutation.isPending}
                         data-testid={`flag-review-${review.id}`}
                       >
-                        <Flag className={`h-4 w-4 ${review.helpfulVotes < -5 ? 'text-red-500' : ''}`} />
+                        <Flag className={`h-4 w-4 ${(review.helpfulVotes ?? 0) < -5 ? 'text-red-500' : ''}`} />
                       </Button>
                       <Button
                         variant="ghost"

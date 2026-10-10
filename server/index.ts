@@ -154,7 +154,7 @@ app.use((req, res, next) => {
   const originalResJson = res.json.bind(res);
   (res as any).json = function (bodyJson: any, ...args: any[]) {
     capturedJsonResponse = bodyJson;
-    return originalResJson(bodyJson, ...args);
+    return originalResJson(bodyJson);
   };
 
   res.on("finish", () => {

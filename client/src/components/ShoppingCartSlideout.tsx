@@ -2,19 +2,21 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/com
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
-import { CartItem, Product } from "@shared/schema";
+import { CartItem, Product, ProductVariant } from "@shared/schema";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
 
 // Enhanced cart item with product details for UI
 interface CartItemWithProduct extends CartItem {
   product: Product;
+  variant: ProductVariant | null;
 }
 
 interface ShoppingCartSlideoutProps {
   isOpen: boolean;
   onClose: () => void;
   items: CartItemWithProduct[];
-  onUpdateQuantity: (productId: string, newQuantity: number) => void;
-  onRemoveItem: (productId: string) => void;
+  onUpdateQuantity: (productId: string, newQuantity: number, size?: string, color?: string, variantId?: string) => Promise<boolean>;
+  onRemoveItem: (productId: string, quantity?: number, size?: string, color?: string, variantId?: string) => Promise<boolean>;
   onCheckout: () => void;
 }
 
@@ -26,10 +28,14 @@ export default function ShoppingCartSlideout({
   onRemoveItem,
   onCheckout
 }: ShoppingCartSlideoutProps) {
-  const subtotal = items.reduce((sum, item) => sum + (Number(item.product.price) * item.quantity), 0);
+  const { policies } = useSiteSettings();
+  const subtotal = items.reduce((sum, item) => sum + (Number(item.variant?.price ?? item.product.price) * item.quantity), 0);
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
-  const shipping = 0; // Free shipping for all orders
-  const tax = 0; // GST set to 0% for all orders
+  const freeThreshold = Math.max(0, Number(policies?.shipping?.freeThreshold ?? 0));
+  const configuredShipping = Math.max(0, Number(policies?.shipping?.shippingCost ?? 0));
+  const shipping = freeThreshold > 0 && subtotal >= freeThreshold ? 0 : configuredShipping;
+  const taxRate = Math.max(0, Number(policies?.gst?.rate ?? 0));
+  const tax = subtotal * taxRate / 100;
   const total = subtotal + shipping + tax;
 
   return (
@@ -69,9 +75,23 @@ export default function ShoppingCartSlideout({
                         {item.product.name}
                       </h4>
                       <p className="text-sm text-muted-foreground">{item.product.category}</p>
+                      {(item.size || item.color) && (
+                        <div className="flex items-center gap-2 mt-1">
+                          {item.size && (
+                            <span className="text-xs bg-muted px-2 py-0.5 rounded">
+                              Size: {item.size}
+                            </span>
+                          )}
+                          {item.color && (
+                            <span className="text-xs bg-muted px-2 py-0.5 rounded">
+                              Color: {item.color}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <div className="flex items-baseline gap-1 mt-1">
                         <p className="text-sm font-semibold text-primary">
-                          ₹{Number(item.product.price).toLocaleString('en-IN')}
+                          ₹{Number(item.variant?.price ?? item.product.price).toLocaleString('en-IN')}
                         </p>
                         <span className="text-xs text-muted-foreground">
                           {item.product.unit || 'per unit'}
@@ -83,7 +103,7 @@ export default function ShoppingCartSlideout({
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => onRemoveItem(item.productId)}
+                        onClick={() => onRemoveItem(item.productId, item.quantity, item.size || undefined, item.color || undefined, item.variantId || undefined)}
                         className="h-8 w-8 text-muted-foreground hover:text-destructive"
                         data-testid={`button-remove-${item.id}`}
                       >
@@ -94,7 +114,7 @@ export default function ShoppingCartSlideout({
                         <Button
                           variant="outline"
                           size="icon"
-                          onClick={() => onUpdateQuantity(item.productId, Math.max(0, item.quantity - 1))}
+                          onClick={() => onUpdateQuantity(item.productId, Math.max(0, item.quantity - 1), item.size || undefined, item.color || undefined, item.variantId || undefined)}
                           disabled={item.quantity <= 1}
                           className="h-8 w-8"
                           data-testid={`button-decrease-${item.id}`}
@@ -109,7 +129,7 @@ export default function ShoppingCartSlideout({
                         <Button
                           variant="outline"
                           size="icon"
-                          onClick={() => onUpdateQuantity(item.productId, item.quantity + 1)}
+                          onClick={() => onUpdateQuantity(item.productId, item.quantity + 1, item.size || undefined, item.color || undefined, item.variantId || undefined)}
                           className="h-8 w-8"
                           data-testid={`button-increase-${item.id}`}
                         >
@@ -132,10 +152,10 @@ export default function ShoppingCartSlideout({
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Shipping</span>
-                  <span className="text-amber-600" data-testid="text-shipping">Free</span>
+                  <span className={shipping === 0 ? "text-amber-600" : ""} data-testid="text-shipping">{shipping === 0 ? "Free" : `₹${shipping.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">GST (0%)</span>
+                  <span className="text-muted-foreground">GST ({taxRate}%)</span>
                   <span data-testid="text-tax">₹{tax.toLocaleString('en-IN')}</span>
                 </div>
                 <Separator />

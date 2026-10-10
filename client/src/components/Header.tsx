@@ -45,7 +45,7 @@ export default function Header({ cartItemCount = 0, onCartOpen }: HeaderProps) {
     clearPendingVerification,
   } = useAuth();
   const { wishlistCount } = useWishlist();
-  const { logoUrl, announcementBar } = useSiteSettings();
+  const { logoUrl, storeName, storeTagline, announcementBar } = useSiteSettings();
 
   // Listen for navigation changes to update active menu highlighting
   useEffect(() => {
@@ -100,7 +100,7 @@ export default function Header({ cartItemCount = 0, onCartOpen }: HeaderProps) {
           {announcementBar.text}
         </div>
       )}
-      <header className="bg-white border-b border-border backdrop-blur-sm w-full overflow-x-hidden">
+      <header className="bg-white/95 border-b border-border/70 backdrop-blur-xl w-full overflow-x-hidden">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
         <div className="flex items-center justify-between h-20 lg:h-24 gap-2 lg:gap-4">
           {/* Logo */}
@@ -157,7 +157,8 @@ export default function Header({ cartItemCount = 0, onCartOpen }: HeaderProps) {
             <Button
               variant="ghost"
               size="icon"
-              className="hidden lg:flex"
+              className="hidden lg:flex hover:bg-primary/10 hover:text-primary"
+              onClick={() => setLocation("/products")}
               data-testid="button-search"
             >
               <Search className="h-5 w-5" />

@@ -29,14 +29,15 @@ export default function Services() {
     ])
   ], []);
 
-  const { pageBanners } = useSiteSettings();
+  const { pageBanners, seoSettings } = useSiteSettings();
   const banner = pageBanners?.services;
   const bannerTitle = banner?.title || "Our Services";
   const bannerSubtitle = banner?.subtitle || "Expert Fashion Curation & Styling Services for Every Occasion";
 
   useSEO({
-    title: "Premium Fashion & Styling Services | Bmaafashion",
+    title: seoSettings?.services?.title || "Premium Fashion & Styling Services | Bmaafashion",
     description:
+      seoSettings?.services?.description ||
       "Expert personal styling, fashion curation, and boutique services. From seasonal collections to occasion-specific dresses, expert consultations, and sustainable fashion guidance.",
     ogTitle: "Fashion Styling & Boutique Services | Bmaafashion",
     ogDescription:

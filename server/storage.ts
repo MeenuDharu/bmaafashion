@@ -1,6 +1,7 @@
 import {
   users,
   products,
+  productVariants,
   categories,
   cartItems,
   orders,
@@ -32,6 +33,7 @@ import {
   messageTemplates,
   notificationHistory,
   recipientGroups,
+  waitlistEntries,
   customerCommunicationHistory,
   customerProfileAuditLog,
   customerAnalyticsCache,
@@ -41,6 +43,8 @@ import {
   type UpsertUser,
   type Product,
   type InsertProduct,
+  type ProductVariant,
+  type InsertProductVariant,
   type Category,
   type InsertCategory,
   type CartItem,
@@ -101,6 +105,8 @@ import {
   type InsertNotificationHistory,
   type RecipientGroup,
   type InsertRecipientGroup,
+  type WaitlistEntry,
+  type InsertWaitlistEntry,
   type WhatsappAnalytics,
   type NotificationMetrics,
   type BulkNotificationRequest,
@@ -159,9 +165,15 @@ import {
   type CustomerCommunication,
   type CustomerProfileUpdate,
   type CustomerExport,
+  type AnalyticsExport,
+  type OrdersExport,
+  type RevenueExport,
+  type ExportHistory,
+  type ExportJob,
 } from "@shared/schema";
+import { coupons, couponUsages, giftCards, giftCardTransactions, loyaltyAccounts, loyaltyTransactions, shippingRules } from "@shared/commerceFeatures";
 import { db } from "./db";
-import { eq, like, ilike, desc, asc, and, or, sql, lte } from "drizzle-orm";
+import { eq, like, ilike, desc, asc, and, or, sql, lte, gte, inArray } from "drizzle-orm";
 import { hashToken } from "./jwtAuth";
 import crypto from "crypto";
 
@@ -183,6 +195,7 @@ export interface IStorage {
   // Product operations
   getProducts(): Promise<Product[]>;
   getProduct(id: string): Promise<Product | undefined>;
+  getVariantById(id: string): Promise<ProductVariant | undefined>;
   getProductsByCategory(category: string): Promise<Product[]>;
   searchProducts(query: string): Promise<Product[]>;
   createProduct(product: InsertProduct): Promise<Product>;
@@ -206,15 +219,15 @@ export interface IStorage {
   clearCartForUser(userId: string): Promise<void>;
   
   // Cart persistence and synchronization operations
-  syncCartItems(userId: string, localCartItems: Array<{productId: string; quantity: number}>): Promise<CartItem[]>;
+  syncCartItems(userId: string, localCartItems: Array<{productId: string; quantity: number; size?: string | null; color?: string | null; variantId?: string | null}>): Promise<CartItem[]>;
   mergeGuestCartToUser(sessionId: string, userId: string): Promise<CartItem[]>;
   setCartItemExpiration(userId?: string, sessionId?: string): Promise<void>;
   getExpiredCartItems(beforeDate?: Date): Promise<CartItem[]>;
   cleanupExpiredCarts(): Promise<number>;
   upsertCartItem(item: InsertCartItem): Promise<CartItem>;
-  getCartItemByProduct(userId: string | null, sessionId: string | null, productId: string, size?: string | null): Promise<CartItem | undefined>;
+  getCartItemByProduct(userId: string | null, sessionId: string | null, productId: string, size?: string | null, color?: string | null, variantId?: string | null): Promise<CartItem | undefined>;
   updateCartItemTimestamp(id: string): Promise<CartItem | undefined>;
-  getCartWithProducts(userId?: string, sessionId?: string): Promise<Array<CartItem & { product: Product | null }>>;
+  getCartWithProducts(userId?: string, sessionId?: string): Promise<Array<CartItem & { product: Product | null; variant: ProductVariant | null }>>;
   
   // Wishlist operations
   getWishlist(userId: string): Promise<Wishlist[]>;
@@ -230,6 +243,7 @@ export interface IStorage {
   getOrdersByEmail(email: string): Promise<Order[]>;
   getOrderItems(orderId: string): Promise<OrderItem[]>;
   updateOrderStatus(id: string, status: string): Promise<Order | undefined>;
+  cancelOrderByCustomer(id: string, userId: string, reason: string): Promise<Order | undefined>;
   updateOrderPaymentStatus(id: string, paymentStatus: string): Promise<Order | undefined>;
   updateOrderRazorpayDetails(id: string, details: {
     razorpayOrderId?: string;
@@ -346,6 +360,10 @@ export interface IStorage {
   getUnreadNotificationCount(userId: string): Promise<number>;
   cleanupOldNotifications(daysToKeep?: number): Promise<void>;
   
+  calculateCustomerSegment(customerId: string): Promise<string>;
+  getCustomerInsights(customerId: string): Promise<any>;
+  searchCustomers(query: string, filters?: { segment?: string; city?: string; state?: string; ltvMin?: number; ltvMax?: number; lastActivityDays?: number }): Promise<any[]>;
+
   // Enhanced profile management operations
   getUserPreferences(userId: string): Promise<UserPreferences | undefined>;
   createUserPreferences(preferences: InsertUserPreferences): Promise<UserPreferences>;
@@ -418,6 +436,8 @@ export interface IStorage {
   getWhatsappRateLimitCount(identifier: string, windowStart: Date, windowType: string, priority: string): Promise<number>;
   incrementWhatsappRateLimit(identifier: string, priority: string): Promise<void>;
 
+  updateWhatsappDeliveryStatus(twilioSid: string, data: { status: string; phoneNumber: string; errorCode?: string; errorMessage?: string; webhookData?: any }): Promise<WhatsappDeliveryLogs | undefined>;
+
   // WhatsApp delivery log operations
   createWhatsappDeliveryLog(log: InsertWhatsappDeliveryLogs): Promise<WhatsappDeliveryLogs>;
   updateWhatsappDeliveryLogStatus(twilioSid: string, status: string, webhookData?: any): Promise<WhatsappDeliveryLogs | undefined>;
@@ -465,27 +485,15 @@ export interface IStorage {
   getCustomerAnalytics(customerId: string, dateRange: { from: string; to: string }): Promise<CustomerAnalyticsResponse>;
   
   // Customer LTV and Analytics Cache Management
-  calculateCustomerLTV(customerId: string): Promise<CustomerAnalyticsCache>;
-  updateCustomerAnalyticsCache(customerId: string): Promise<CustomerAnalyticsCache>;
-  getCustomerAnalyticsFromCache(customerId: string): Promise<CustomerAnalyticsCache | undefined>;
-  refreshAllCustomerAnalytics(): Promise<void>;
   calculateCustomerSegment(customerId: string): Promise<string>; // returns segment: new, returning, vip, at_risk, inactive
   
   // Customer Communication Operations
-  createCustomerCommunication(communication: InsertCustomerCommunicationHistory): Promise<CustomerCommunicationHistory>;
-  getCustomerCommunicationHistory(customerId: string, limit?: number): Promise<CustomerCommunicationHistory[]>;
   sendCustomerCommunication(communication: CustomerCommunication, adminUserId: string): Promise<CustomerCommunicationHistory>;
   
   // Customer Profile Management with Audit Trail
   updateCustomerProfile(customerId: string, updates: CustomerProfileUpdate, adminUserId: string, ipAddress?: string, userAgent?: string): Promise<CustomerDetail>;
-  getCustomerProfileAuditLog(customerId: string, limit?: number): Promise<CustomerProfileAuditLog[]>;
-  createProfileAuditEntry(auditEntry: InsertCustomerProfileAuditLog): Promise<CustomerProfileAuditLog>;
   
   // Customer Notes Management
-  createCustomerNote(note: InsertCustomerNotes): Promise<CustomerNotes>;
-  getCustomerNotes(customerId: string, includePrivate?: boolean): Promise<CustomerNotes[]>;
-  updateCustomerNote(noteId: string, updates: Partial<InsertCustomerNotes>): Promise<CustomerNotes | undefined>;
-  deleteCustomerNote(noteId: string, adminUserId: string): Promise<void>;
   
   // Customer Segmentation and Analytics
   getCustomerSegmentation(): Promise<{
@@ -498,7 +506,6 @@ export interface IStorage {
     }>;
     totalCustomers: number;
   }>;
-  getCustomersBySegment(segment: string, limit?: number, offset?: number): Promise<CustomerDetail[]>;
   getCustomerInsights(customerId: string): Promise<{
     riskScore: number; // 0-100, higher = more at risk
     valueScore: number; // 0-100, higher = more valuable
@@ -518,8 +525,6 @@ export interface IStorage {
   
   // Customer Export and Bulk Operations
   exportCustomerData(exportConfig: CustomerExport): Promise<any[]>;
-  bulkUpdateCustomerSegment(customerIds: string[], segment: string, adminUserId: string): Promise<void>;
-  bulkSendCommunication(customerIds: string[], communication: CustomerCommunication, adminUserId: string): Promise<CustomerCommunicationHistory[]>;
   
   // Customer Search and Filtering
   searchCustomers(query: string, filters?: {
@@ -589,6 +594,9 @@ export interface IStorage {
   getMessageTemplates(): Promise<MessageTemplate[]>;
   getMessageTemplate(id: string): Promise<MessageTemplate | undefined>;
   createMessageTemplate(template: InsertMessageTemplate): Promise<MessageTemplate>;
+  createWaitlistEntry(entry: InsertWaitlistEntry): Promise<WaitlistEntry>;
+  getWaitlistEntries(productId?: string): Promise<WaitlistEntry[]>;
+  removeWaitlistEntry(id: string): Promise<void>;
   updateMessageTemplate(id: string, updates: Partial<InsertMessageTemplate>): Promise<MessageTemplate | undefined>;
   deleteMessageTemplate(id: string): Promise<void>;
   approveMessageTemplate(id: string, adminUserId: string): Promise<MessageTemplate | undefined>;
@@ -598,7 +606,7 @@ export interface IStorage {
   getNotificationMetrics(dateRange?: {from: Date, to: Date}): Promise<NotificationMetrics>;
   getNotificationHistory(params: any): Promise<NotificationHistory[]>;
   createNotificationHistory(history: InsertNotificationHistory): Promise<NotificationHistory>;
-  sendBulkNotifications(request: BulkNotificationRequest): Promise<BulkNotificationResult>;
+  sendBulkNotifications(request: BulkNotificationRequest, adminUserId: string): Promise<BulkNotificationResult>;
   retryNotification(id: string): Promise<NotificationHistory | undefined>;
   exportNotificationsData(filters: any): Promise<any[]>;
 
@@ -615,8 +623,511 @@ export interface IStorage {
   upsertSiteSettings(data: InsertSiteSettings): Promise<SiteSettings>;
 }
 
+function cryptoRandomOrderNumber() { return Math.random().toString(36).slice(2, 10).toUpperCase(); }
+
+type EmailNotificationPreferences = NonNullable<UserPreferences["emailNotifications"]>;
+type SmsNotificationPreferences = NonNullable<UserPreferences["smsNotifications"]>;
+type WhatsappNotificationPreferences = NonNullable<UserPreferences["whatsappNotifications"]>;
+type PrivacyPreferences = NonNullable<UserPreferences["privacySettings"]>;
+type SitePolicies = NonNullable<SiteSettings["policies"]>;
+type CustomBanner = NonNullable<SiteSettings["customBanners"]>[number];
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+
+const normalizeEmailNotifications = (value: unknown): EmailNotificationPreferences | null | undefined => {
+  if (value == null) return value;
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return {
+    orderUpdates: typeof record.orderUpdates === "boolean" ? record.orderUpdates : undefined,
+    promotions: typeof record.promotions === "boolean" ? record.promotions : undefined,
+    stockAlerts: typeof record.stockAlerts === "boolean" ? record.stockAlerts : undefined,
+    newsletter: typeof record.newsletter === "boolean" ? record.newsletter : undefined,
+  };
+};
+
+const normalizeSmsNotifications = (value: unknown): SmsNotificationPreferences | null | undefined => {
+  if (value == null) return value;
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return {
+    enabled: typeof record.enabled === "boolean" ? record.enabled : undefined,
+    orderConfirmation: typeof record.orderConfirmation === "boolean" ? record.orderConfirmation : undefined,
+    orderUpdates: typeof record.orderUpdates === "boolean" ? record.orderUpdates : undefined,
+    paymentConfirmation: typeof record.paymentConfirmation === "boolean" ? record.paymentConfirmation : undefined,
+    paymentConfirmations: typeof record.paymentConfirmations === "boolean" ? record.paymentConfirmations : undefined,
+    shippingUpdates: typeof record.shippingUpdates === "boolean" ? record.shippingUpdates : undefined,
+    shippingNotifications: typeof record.shippingNotifications === "boolean" ? record.shippingNotifications : undefined,
+    deliveryNotifications: typeof record.deliveryNotifications === "boolean" ? record.deliveryNotifications : undefined,
+    promotional: typeof record.promotional === "boolean" ? record.promotional : undefined,
+    promotionalOffers: typeof record.promotionalOffers === "boolean" ? record.promotionalOffers : undefined,
+    stockAlerts: typeof record.stockAlerts === "boolean" ? record.stockAlerts : undefined,
+    accountNotifications: typeof record.accountNotifications === "boolean" ? record.accountNotifications : undefined,
+  };
+};
+
+const normalizeWhatsappNotifications = (value: unknown): WhatsappNotificationPreferences | null | undefined => {
+  if (value == null) return value;
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return {
+    isOptedIn: typeof record.isOptedIn === "boolean" ? record.isOptedIn : undefined,
+    orderConfirmation: typeof record.orderConfirmation === "boolean" ? record.orderConfirmation : undefined,
+    orderUpdates: typeof record.orderUpdates === "boolean" ? record.orderUpdates : undefined,
+    shippingNotifications: typeof record.shippingNotifications === "boolean" ? record.shippingNotifications : undefined,
+    paymentConfirmations: typeof record.paymentConfirmations === "boolean" ? record.paymentConfirmations : undefined,
+    deliveryNotifications: typeof record.deliveryNotifications === "boolean" ? record.deliveryNotifications : undefined,
+    stockAlerts: typeof record.stockAlerts === "boolean" ? record.stockAlerts : undefined,
+    promotionalMessages: typeof record.promotionalMessages === "boolean" ? record.promotionalMessages : undefined,
+    accountNotifications: typeof record.accountNotifications === "boolean" ? record.accountNotifications : undefined,
+  };
+};
+
+const normalizePrivacySettings = (value: unknown): PrivacyPreferences | null | undefined => {
+  if (value == null) return value;
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return {
+    profileVisibility: typeof record.profileVisibility === "string" ? record.profileVisibility : undefined,
+    showOrderHistory: typeof record.showOrderHistory === "boolean" ? record.showOrderHistory : undefined,
+    shareActivityData: typeof record.shareActivityData === "boolean" ? record.shareActivityData : undefined,
+  };
+};
+
+const normalizeContactInfo = (value: unknown): SiteSettings["contactInfo"] => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    phone: typeof record.phone === "string" ? record.phone : undefined,
+    email: typeof record.email === "string" ? record.email : undefined,
+    address: typeof record.address === "string" ? record.address : undefined,
+    whatsapp: typeof record.whatsapp === "string" ? record.whatsapp : undefined,
+    businessHours: typeof record.businessHours === "string" ? record.businessHours : undefined,
+  };
+};
+
+const normalizeSocialLinks = (value: unknown): SiteSettings["socialLinks"] => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    facebook: typeof record.facebook === "string" ? record.facebook : undefined,
+    instagram: typeof record.instagram === "string" ? record.instagram : undefined,
+    twitter: typeof record.twitter === "string" ? record.twitter : undefined,
+    youtube: typeof record.youtube === "string" ? record.youtube : undefined,
+    linkedin: typeof record.linkedin === "string" ? record.linkedin : undefined,
+  };
+};
+
+type FooterSettings = {
+  copyright?: string;
+  links?: Array<{ label: string; url: string }>;
+  newsletterEnabled?: boolean;
+  showSocialLinks?: boolean;
+};
+
+const normalizeFooterSettings = (value: unknown): FooterSettings | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+
+  const links = Array.isArray(record.links)
+    ? record.links.reduce<Array<{ label: string; url: string }>>((result, item) => {
+        const link = asRecord(item);
+        if (!link || typeof link.label !== "string" || typeof link.url !== "string") return result;
+        result.push({ label: link.label, url: link.url });
+        return result;
+      }, [])
+    : undefined;
+
+  return {
+    copyright: typeof record.copyright === "string" ? record.copyright : undefined,
+    links,
+    newsletterEnabled: typeof record.newsletterEnabled === "boolean" ? record.newsletterEnabled : undefined,
+    showSocialLinks: typeof record.showSocialLinks === "boolean" ? record.showSocialLinks : undefined,
+  };
+};
+
+type MaintenanceModeSettings = {
+  enabled?: boolean;
+  title?: string;
+  message?: string;
+};
+
+const normalizeMaintenanceMode = (value: unknown): MaintenanceModeSettings | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    enabled: typeof record.enabled === "boolean" ? record.enabled : undefined,
+    title: typeof record.title === "string" ? record.title : undefined,
+    message: typeof record.message === "string" ? record.message : undefined,
+  };
+};
+
+type WhatsappWidgetSettings = {
+  enabled?: boolean;
+  phone?: string;
+};
+
+const normalizeWhatsappWidget = (value: unknown): WhatsappWidgetSettings | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    enabled: typeof record.enabled === "boolean" ? record.enabled : undefined,
+    phone: typeof record.phone === "string" ? record.phone : undefined,
+  };
+};
+
+type HomepageSectionsSettings = {
+  showStats?: boolean;
+  showWhyChoose?: boolean;
+  showTestimonials?: boolean;
+  showFeaturedProducts?: boolean;
+  showBenefits?: boolean;
+};
+
+type PopupSettings = {
+  enabled?: boolean;
+  title?: string;
+  message?: string;
+  buttonText?: string;
+  delay?: number;
+  couponCode?: string;
+};
+
+const normalizePopupSettings = (value: unknown): PopupSettings | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    enabled: typeof record.enabled === "boolean" ? record.enabled : undefined,
+    title: typeof record.title === "string" ? record.title : undefined,
+    message: typeof record.message === "string" ? record.message : undefined,
+    buttonText: typeof record.buttonText === "string" ? record.buttonText : undefined,
+    delay: typeof record.delay === "number" ? record.delay : undefined,
+    couponCode: typeof record.couponCode === "string" ? record.couponCode : undefined,
+  };
+};
+
+type CountdownTimerSettings = {
+  enabled?: boolean;
+  endsAt?: string;
+  message?: string;
+  bgColor?: string;
+  textColor?: string;
+};
+
+const normalizeCountdownTimer = (value: unknown): CountdownTimerSettings | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    enabled: typeof record.enabled === "boolean" ? record.enabled : undefined,
+    endsAt: typeof record.endsAt === "string" ? record.endsAt : undefined,
+    message: typeof record.message === "string" ? record.message : undefined,
+    bgColor: typeof record.bgColor === "string" ? record.bgColor : undefined,
+    textColor: typeof record.textColor === "string" ? record.textColor : undefined,
+  };
+};
+
+type TrustBadge = NonNullable<SiteSettings["trustBadges"]>[number];
+
+const normalizeTrustBadges = (value: unknown): SiteSettings["trustBadges"] => {
+  if (value == null) return null;
+  if (!Array.isArray(value)) return null;
+  return value.reduce<TrustBadge[]>((result, item) => {
+    const record = asRecord(item);
+    if (!record || typeof record.id !== "string" || typeof record.label !== "string" ||
+        typeof record.icon !== "string" || typeof record.active !== "boolean") return result;
+    result.push({
+      id: record.id,
+      label: record.label,
+      icon: record.icon,
+      active: record.active,
+    });
+    return result;
+  }, []);
+};
+
+type ProductSettings = NonNullable<SiteSettings["productSettings"]>;
+const normalizeProductSettings = (value: unknown): ProductSettings | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    perPage: typeof record.perPage === "number" ? record.perPage : undefined,
+    defaultSort: typeof record.defaultSort === "string" ? record.defaultSort : undefined,
+    newBadgeDays: typeof record.newBadgeDays === "number" ? record.newBadgeDays : undefined,
+    lowStockThreshold: typeof record.lowStockThreshold === "number" ? record.lowStockThreshold : undefined,
+  };
+};
+
+type OrderSettings = NonNullable<SiteSettings["orderSettings"]>;
+const normalizeOrderSettings = (value: unknown): OrderSettings | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    codEnabled: typeof record.codEnabled === "boolean" ? record.codEnabled : undefined,
+    autoCancelHours: typeof record.autoCancelHours === "number" ? record.autoCancelHours : undefined,
+    deliveryMessage: typeof record.deliveryMessage === "string" ? record.deliveryMessage : undefined,
+  };
+};
+
+type TrackingSettings = NonNullable<SiteSettings["trackingSettings"]>;
+const normalizeTrackingSettings = (value: unknown): TrackingSettings | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    googleAnalyticsId: typeof record.googleAnalyticsId === "string" ? record.googleAnalyticsId : undefined,
+    facebookPixelId: typeof record.facebookPixelId === "string" ? record.facebookPixelId : undefined,
+  };
+};
+
+type CookieConsent = NonNullable<SiteSettings["cookieConsent"]>;
+const normalizeCookieConsent = (value: unknown): CookieConsent | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    enabled: typeof record.enabled === "boolean" ? record.enabled : undefined,
+    message: typeof record.message === "string" ? record.message : undefined,
+    acceptText: typeof record.acceptText === "string" ? record.acceptText : undefined,
+    declineText: typeof record.declineText === "string" ? record.declineText : undefined,
+  };
+};
+
+type AnnouncementBar = NonNullable<SiteSettings["announcementBar"]>;
+const normalizeAnnouncementBar = (value: unknown): AnnouncementBar | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    text: typeof record.text === "string" ? record.text : undefined,
+    active: typeof record.active === "boolean" ? record.active : undefined,
+    bgColor: typeof record.bgColor === "string" ? record.bgColor : undefined,
+    textColor: typeof record.textColor === "string" ? record.textColor : undefined,
+  };
+};
+
+const normalizeHomepageSections = (value: unknown): HomepageSectionsSettings | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    showStats: typeof record.showStats === "boolean" ? record.showStats : undefined,
+    showWhyChoose: typeof record.showWhyChoose === "boolean" ? record.showWhyChoose : undefined,
+    showTestimonials: typeof record.showTestimonials === "boolean" ? record.showTestimonials : undefined,
+    showFeaturedProducts: typeof record.showFeaturedProducts === "boolean" ? record.showFeaturedProducts : undefined,
+    showBenefits: typeof record.showBenefits === "boolean" ? record.showBenefits : undefined,
+  };
+};
+
+const normalizeSeoSettings = (value: unknown): SiteSettings["seoSettings"] => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+
+  const normalizePage = (page: unknown) => {
+    const pageRecord = asRecord(page);
+    if (!pageRecord) return undefined;
+    return {
+      title: typeof pageRecord.title === "string" ? pageRecord.title : undefined,
+      description: typeof pageRecord.description === "string" ? pageRecord.description : undefined,
+    };
+  };
+
+  return {
+    home: normalizePage(record.home),
+    products: normalizePage(record.products),
+    freshProduce: normalizePage(record.freshProduce),
+    about: normalizePage(record.about),
+    contact: normalizePage(record.contact),
+    services: normalizePage(record.services),
+  };
+};
+
+type PageBanner = {
+  imageUrl?: string;
+  title?: string;
+  subtitle?: string;
+};
+
+type PageBanners = {
+  about?: PageBanner;
+  contact?: PageBanner;
+  services?: PageBanner;
+  products?: PageBanner;
+  freshProduce?: PageBanner;
+};
+
+const normalizePageBanners = (value: unknown): PageBanners | null => {
+  if (value == null) return null;
+  const record = asRecord(value);
+  if (!record) return null;
+
+  const normalizeBanner = (banner: unknown): PageBanner | undefined => {
+    const bannerRecord = asRecord(banner);
+    if (!bannerRecord) return undefined;
+    return {
+      imageUrl: typeof bannerRecord.imageUrl === "string" ? bannerRecord.imageUrl : undefined,
+      title: typeof bannerRecord.title === "string" ? bannerRecord.title : undefined,
+      subtitle: typeof bannerRecord.subtitle === "string" ? bannerRecord.subtitle : undefined,
+    };
+  };
+
+  return {
+    about: normalizeBanner(record.about),
+    contact: normalizeBanner(record.contact),
+    services: normalizeBanner(record.services),
+    products: normalizeBanner(record.products),
+    freshProduce: normalizeBanner(record.freshProduce),
+  };
+};
+
+const normalizeSitePolicies = (value: unknown): SitePolicies | null | undefined => {
+  if (value == null) return value;
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const shipping = asRecord(record.shipping);
+  const returns = asRecord(record.returns);
+  const gst = asRecord(record.gst);
+  return {
+    shipping: shipping ? {
+      freeThreshold: typeof shipping.freeThreshold === "number" ? shipping.freeThreshold : undefined,
+      shippingCost: typeof shipping.shippingCost === "number" ? shipping.shippingCost : undefined,
+      deliveryDays: typeof shipping.deliveryDays === "string" ? shipping.deliveryDays : undefined,
+      text: typeof shipping.text === "string" ? shipping.text : undefined,
+    } : undefined,
+    returns: returns ? {
+      windowDays: typeof returns.windowDays === "number" ? returns.windowDays : undefined,
+      text: typeof returns.text === "string" ? returns.text : undefined,
+    } : undefined,
+    gst: gst ? {
+      rate: typeof gst.rate === "number" ? gst.rate : undefined,
+      text: typeof gst.text === "string" ? gst.text : undefined,
+    } : undefined,
+  };
+};
+
+type SitePromotion = NonNullable<SiteSettings["promotions"]>[number];
+
+const normalizePromotions = (value: unknown): SiteSettings["promotions"] => {
+  if (value == null) return null;
+  if (!Array.isArray(value)) return null;
+  return value.reduce<SitePromotion[]>((result, item) => {
+    const promotion = asRecord(item);
+    if (!promotion || typeof promotion.id !== "string" || typeof promotion.message !== "string" || typeof promotion.active !== "boolean") {
+      return result;
+    }
+    const discountType = promotion.discountType === "percentage" || promotion.discountType === "fixed"
+      ? promotion.discountType
+      : undefined;
+    result.push({
+      id: promotion.id,
+      message: promotion.message,
+      code: typeof promotion.code === "string" ? promotion.code : undefined,
+      discountType,
+      discountValue: typeof promotion.discountValue === "number" ? promotion.discountValue : undefined,
+      expiry: typeof promotion.expiry === "string" ? promotion.expiry : undefined,
+      active: promotion.active,
+      bgColor: typeof promotion.bgColor === "string" ? promotion.bgColor : undefined,
+      textColor: typeof promotion.textColor === "string" ? promotion.textColor : undefined,
+    });
+    return result;
+  }, []);
+};
+
+const normalizeCustomBanners = (value: unknown): SiteSettings["customBanners"] => {
+  if (value == null) return null;
+  if (!Array.isArray(value)) return null;
+  return value.reduce<CustomBanner[]>((result, item) => {
+    const banner = asRecord(item);
+    if (!banner || typeof banner.id !== "string") return result;
+    result.push({
+      id: banner.id,
+      imageUrl: typeof banner.imageUrl === "string" ? banner.imageUrl : undefined,
+      title: typeof banner.title === "string" ? banner.title : undefined,
+      subtitle: typeof banner.subtitle === "string" ? banner.subtitle : undefined,
+      buttonText: typeof banner.buttonText === "string" ? banner.buttonText : undefined,
+      buttonLink: typeof banner.buttonLink === "string" ? banner.buttonLink : undefined,
+    });
+    return result;
+  }, []);
+};
+
+function cartIdentity(productId: string, variantId?: string | null, size?: string | null, color?: string | null): string {
+  return `${productId}::${variantId || ''}::${size || ''}::${color || ''}`;
+}
+
 export class DatabaseStorage implements IStorage {
+  async sendCustomerCommunication(communication: CustomerCommunication, adminUserId: string): Promise<CustomerCommunicationHistory> {
+    const [created] = await db.insert(customerCommunicationHistory).values({
+      customerId: communication.customerId,
+      adminUserId,
+      communicationType: communication.communicationType,
+      channel: communication.communicationType === 'email' ? 'email_queue' : communication.communicationType,
+      subject: communication.subject ?? null,
+      content: communication.content,
+      priority: communication.priority ?? 'normal',
+      status: communication.communicationType === 'note' ? 'sent' : 'pending',
+      tags: communication.tags ?? [],
+    }).returning();
+
+    if (communication.communicationType === 'email') {
+      const customer = await this.getUser(communication.customerId);
+      if (!customer?.email) throw new Error('Customer email address not found');
+      const scheduledAt = communication.scheduleFor ? new Date(communication.scheduleFor) : new Date();
+      await db.insert(emailQueue).values({
+        type: 'customer_communication',
+        priority: communication.priority ?? 'normal',
+        status: 'pending',
+        to: customer.email,
+        from: process.env.SMTP_EMAIL || 'no-reply@bmaafashion.com',
+        recipientName: [customer.firstName, customer.lastName].filter(Boolean).join(' ') || customer.email,
+        subject: communication.subject || 'Message from BMAA Fashion',
+        htmlContent: communication.content,
+        textContent: communication.content.replace(/<[^>]*>/g, ''),
+        userId: customer.id,
+        scheduledAt,
+      });
+    }
+    return created;
+  }
+  async createWaitlistEntry(entry: InsertWaitlistEntry): Promise<WaitlistEntry> {
+    const existing = await db.select().from(waitlistEntries).where(and(eq(waitlistEntries.email, entry.email), eq(waitlistEntries.productId, entry.productId))).limit(1);
+    if (existing[0]) return existing[0];
+    const [created] = await db.insert(waitlistEntries).values(entry).returning();
+    return created;
+  }
+
+  async getWaitlistEntries(productId?: string): Promise<WaitlistEntry[]> {
+    return productId
+      ? await db.select().from(waitlistEntries).where(eq(waitlistEntries.productId, productId)).orderBy(desc(waitlistEntries.createdAt))
+      : await db.select().from(waitlistEntries).orderBy(desc(waitlistEntries.createdAt));
+  }
+
+  async removeWaitlistEntry(id: string): Promise<void> {
+    await db.delete(waitlistEntries).where(eq(waitlistEntries.id, id));
+  }
+
   // User operations - JWT Auth
+  async getVariantById(id: string): Promise<ProductVariant | undefined> {
+    const [variant] = await db
+      .select()
+      .from(productVariants)
+      .where(eq(productVariants.id, id))
+      .limit(1);
+    return variant;
+  }
+
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
@@ -780,7 +1291,7 @@ export class DatabaseStorage implements IStorage {
         const [category] = await tx
           .select()
           .from(categories)
-          .where(eq(categories.mainCategory, product.mainCategory));
+          .where(eq(categories.mainCategory, product.mainCategory!));
         
         if (category && !category.subcategories.includes(product.category)) {
           // Add the new subcategory atomically
@@ -968,10 +1479,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Cart persistence and synchronization operations
-  async syncCartItems(userId: string, localCartItems: Array<{productId: string; quantity: number}>): Promise<CartItem[]> {
+  async syncCartItems(userId: string, localCartItems: Array<{productId: string; quantity: number; size?: string | null; color?: string | null; variantId?: string | null}>): Promise<CartItem[]> {
     // Get existing database cart items for the user
     const dbCartItems = await this.getCartItems(undefined, userId);
-    const dbCartMap = new Map(dbCartItems.map(item => [item.productId, item]));
+    const dbCartMap = new Map(dbCartItems.map(item => [cartIdentity(item.productId, item.variantId, item.size, item.color), item]));
     
     // Calculate expiration date for user cart items (90 days)
     const expiresAt = new Date();
@@ -982,7 +1493,7 @@ export class DatabaseStorage implements IStorage {
     
     // Process local cart items
     for (const localItem of localCartItems) {
-      const dbItem = dbCartMap.get(localItem.productId);
+      const dbItem = dbCartMap.get(cartIdentity(localItem.productId, localItem.variantId, localItem.size, localItem.color));
       
       if (dbItem) {
         // Item exists in both: sum quantities (conflict resolution)
@@ -997,7 +1508,7 @@ export class DatabaseStorage implements IStorage {
           .where(eq(cartItems.id, dbItem.id))
           .returning();
         syncedItems.push(updated);
-        dbCartMap.delete(localItem.productId); // Mark as processed
+        dbCartMap.delete(cartIdentity(localItem.productId, localItem.variantId, localItem.size, localItem.color)); // Mark as processed
       } else {
         // Item only in local cart: verify product exists before adding
         const productExists = await db
@@ -1013,7 +1524,10 @@ export class DatabaseStorage implements IStorage {
             .values({
               userId,
               productId: localItem.productId,
+              variantId: localItem.variantId || null,
               quantity: localItem.quantity,
+              size: localItem.size || null,
+              color: localItem.color || null,
               sessionId: null,
               addedAt: new Date(),
               updatedAt: new Date(),
@@ -1055,7 +1569,7 @@ export class DatabaseStorage implements IStorage {
     // Process each guest cart item
     for (const guestItem of guestCartItems) {
       // Check if user already has this product in cart
-      const existingUserItem = await this.getCartItemByProduct(userId, null, guestItem.productId);
+      const existingUserItem = await this.getCartItemByProduct(userId, null, guestItem.productId, guestItem.size || null, guestItem.color || null, guestItem.variantId || null);
       
       if (existingUserItem) {
         // Merge quantities
@@ -1077,7 +1591,10 @@ export class DatabaseStorage implements IStorage {
           .values({
             userId,
             productId: guestItem.productId,
+            variantId: guestItem.variantId || null,
             quantity: guestItem.quantity,
+            size: guestItem.size || null,
+            color: guestItem.color || null,
             sessionId: null,
             addedAt: guestItem.addedAt || new Date(),
             updatedAt: new Date(),
@@ -1150,16 +1667,19 @@ export class DatabaseStorage implements IStorage {
       item.userId || null,
       item.sessionId || null,
       item.productId,
-      item.size || null
+      item.size || null,
+      item.color || null,
+      item.variantId || null
     );
     
     if (existingItem) {
-      console.log(`📝 Existing cart item found - Current quantity: ${existingItem.quantity}, Adding: ${item.quantity}, New total: ${existingItem.quantity + item.quantity}`);
+      const itemQuantity = item.quantity ?? 0;
+      console.log(`📝 Existing cart item found - Current quantity: ${existingItem.quantity}, Adding: ${itemQuantity}, New total: ${existingItem.quantity + itemQuantity}`);
       // Update existing item - ADD to existing quantity instead of replacing
       const [updated] = await db
         .update(cartItems)
         .set({
-          quantity: existingItem.quantity + item.quantity,
+          quantity: existingItem.quantity + itemQuantity,
           updatedAt: new Date(),
           expiresAt
         })
@@ -1185,7 +1705,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getCartItemByProduct(userId: string | null, sessionId: string | null, productId: string, size?: string | null): Promise<CartItem | undefined> {
+  async getCartItemByProduct(userId: string | null, sessionId: string | null, productId: string, size?: string | null, color?: string | null, variantId?: string | null): Promise<CartItem | undefined> {
     const conditions = [];
     
     if (userId) {
@@ -1199,11 +1719,23 @@ export class DatabaseStorage implements IStorage {
       return undefined;
     }
     
-    // Add size condition
+    // Variant ID is the authoritative identity for variant-backed cart items.
+    // Size/color remain as a backwards-compatible fallback for legacy cart rows.
+    if (variantId) {
+      conditions.push(eq(cartItems.variantId, variantId));
+    } else {
+      conditions.push(sql`${cartItems.variantId} IS NULL`);
+    }
+
     if (size) {
       conditions.push(eq(cartItems.size, size));
     } else {
       conditions.push(sql`${cartItems.size} IS NULL`);
+    }
+    if (color) {
+      conditions.push(eq(cartItems.color, color));
+    } else {
+      conditions.push(sql`${cartItems.color} IS NULL`);
     }
     
     const [item] = await db
@@ -1223,15 +1755,17 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async getCartWithProducts(userId?: string, sessionId?: string): Promise<Array<CartItem & { product: Product | null }>> {
+  async getCartWithProducts(userId?: string, sessionId?: string): Promise<Array<CartItem & { product: Product | null; variant: ProductVariant | null }>> {
     const cartItemsData = await this.getCartItems(sessionId, userId);
     
     const itemsWithProducts = await Promise.all(
       cartItemsData.map(async (item) => {
         const product = await this.getProduct(item.productId);
+        const variant = item.variantId ? await this.getVariantById(item.variantId) : undefined;
         return {
           ...item,
-          product: product ?? null
+          product: product ?? null,
+          variant: variant ?? null
         };
       })
     );
@@ -1283,6 +1817,30 @@ export class DatabaseStorage implements IStorage {
   }
 
   // SECURE order creation - prevents price tampering and ensures atomicity
+  private async calculateShippingCost(tx: any, shippingAddress: string, subtotal: number, items: any[]): Promise<number> {
+    const policyConfig = await tx.select().from(siteSettings).where(eq(siteSettings.id, 1)).limit(1);
+    const policy = policyConfig[0]?.policies?.shipping || {};
+    const lines = String(shippingAddress || "").split(/\n/).map(v => v.trim()).filter(Boolean);
+    const locationLine = lines[2] || "";
+    const parts = locationLine.split(",").map(v => v.trim());
+    const state = (parts[1] || parts[0] || "").replace(/\b\d{5,6}\b/g, "").trim().toLowerCase();
+    const country = (lines[3] || "India").trim().toLowerCase();
+    const rules = await tx.select().from(shippingRules).where(eq(shippingRules.active, true)).orderBy(asc(shippingRules.priority));
+    const rule = rules.find((r: any) => (!r.country || r.country.trim().toLowerCase() === country) && (!r.state || r.state.trim().toLowerCase() === state));
+    const baseCharge = rule ? Math.max(0, Number(rule.shippingCharge || 0)) : Math.max(0, Number(policy.shippingCost || 0));
+    const freeThreshold = rule?.freeShippingThreshold != null ? Math.max(0, Number(rule.freeShippingThreshold)) : Math.max(0, Number(policy.freeThreshold || 0));
+    const normalShipping = freeThreshold > 0 && subtotal >= freeThreshold ? 0 : baseCharge;
+    const productIds = items.map((item: any) => String(item.productId)).filter(Boolean);
+    const shippingProducts = productIds.length ? await tx.select({ id: products.id, shippingChargeApplicable: products.shippingChargeApplicable, shippingCharge: products.shippingCharge }).from(products).where(inArray(products.id, productIds)) : [];
+    const productMap = new Map<string, { id: string; shippingChargeApplicable: boolean; shippingCharge: string | null }>(shippingProducts.map((p: { id: string; shippingChargeApplicable: boolean; shippingCharge: string | null }) => [p.id, p] as [string, { id: string; shippingChargeApplicable: boolean; shippingCharge: string | null }]));
+    const productShipping = items.reduce((sum: number, item: any) => {
+      const product = productMap.get(String(item.productId));
+      if (!product?.shippingChargeApplicable) return sum;
+      return sum + Math.max(0, Number(product.shippingCharge || 0)) * Math.max(0, Number(item.quantity || 0));
+    }, 0);
+    return Number((normalShipping + productShipping).toFixed(2));
+  }
+
   async createSecureOrder(orderData: any, items: any[], userId: string | null = null): Promise<Order> {
     const result = await db.transaction(async (tx) => {
       // Validate and get current product prices from database
@@ -1300,32 +1858,137 @@ export class DatabaseStorage implements IStorage {
           throw new Error(`Product not found: ${item.productId}`);
         }
         
-        // Check stock availability
-        if (product.inStock < item.quantity) {
+        let resolvedVariant: ProductVariant | undefined;
+
+        if (item.variantId) {
+          [resolvedVariant] = await tx
+            .select()
+            .from(productVariants)
+            .where(and(eq(productVariants.id, item.variantId), eq(productVariants.productId, item.productId)))
+            .limit(1);
+        } else if (item.size || item.color) {
+          [resolvedVariant] = await tx
+            .select()
+            .from(productVariants)
+            .where(and(
+              eq(productVariants.productId, item.productId),
+              item.size ? eq(productVariants.size, item.size) : sql`true`,
+              item.color ? eq(productVariants.color, item.color) : sql`true`
+            ))
+            .limit(1);
+        }
+
+        if (resolvedVariant) {
+          if (!resolvedVariant.isActive) throw new Error(`Variant is not available for ${product.name}`);
+          if (resolvedVariant.stockQuantity < item.quantity) {
+            throw new Error(`Insufficient variant stock for ${product.name} (Size: ${resolvedVariant.size || 'N/A'}, Color: ${resolvedVariant.color || 'N/A'}). Available: ${resolvedVariant.stockQuantity}, Requested: ${item.quantity}`);
+          }
+        } else if (item.variantId || item.size || item.color) {
+          throw new Error(`Variant not found for ${product.name} (Size: ${item.size || 'N/A'}, Color: ${item.color || 'N/A'})`);
+        } else if (product.inStock < item.quantity) {
           throw new Error(`Insufficient stock for ${product.name}. Available: ${product.inStock}, Requested: ${item.quantity}`);
         }
-        
-        // Use database price, not client-provided price
-        const itemTotal = parseFloat(product.price) * item.quantity;
+
+        // Variant price is authoritative when configured; otherwise use the product price.
+        const unitPrice = resolvedVariant?.price ?? product.price;
+        const itemTotal = parseFloat(unitPrice) * item.quantity;
         subtotal += itemTotal;
         
         validatedItems.push({
           productId: item.productId,
+          variantId: resolvedVariant?.id ?? item.variantId ?? null,
           productName: product.name,
-          productPrice: product.price,
+          productPrice: unitPrice,
           quantity: item.quantity,
           totalPrice: itemTotal.toFixed(2),
-          orderId: '' // Will be set after order creation
+          orderId: '', // Will be set after order creation
+          size: item.size || null,
+          color: item.color || null
         });
         
         // Stock will be decremented atomically within this transaction
       }
       
-      // Calculate shipping and tax (simple rules for now)
-      const shippingCost = 0; // Free shipping for all orders
-      const taxRate = 0; // GST set to 0% for all orders
-      const taxAmount = subtotal * taxRate;
-      const total = subtotal + shippingCost + taxAmount;
+      // Apply admin-configured site settings server-side. Never trust totals from the browser.
+      const [siteConfig] = await tx.select().from(siteSettings).where(eq(siteSettings.id, 1));
+      const policies = siteConfig?.policies || {};
+      const shippingPolicy = policies.shipping || {};
+      const gstPolicy = policies.gst || {};
+      const promotions = Array.isArray(siteConfig?.promotions) ? siteConfig!.promotions : [];
+      const promoCode = typeof orderData.promoCode === 'string' ? orderData.promoCode.trim().toUpperCase() : '';
+      let discountAmount = 0;
+      let appliedPromoCode: string | null = null;
+      let appliedCouponId: string | null = null;
+      let loyaltyPointsRedeemed = Math.max(0, Number(orderData.loyaltyPointsRedeemed || 0));
+      let loyaltyDiscountAmount = 0;
+      let giftCardDiscountAmount = 0;
+      let appliedGiftCardId: string | null = null;
+
+      if (promoCode) {
+        // Prefer the production coupon table; fall back to the legacy site-settings promotions.
+        const [coupon] = await tx.select().from(coupons).where(eq(coupons.code, promoCode)).limit(1);
+        if (coupon && coupon.active) {
+          const now = new Date();
+          if (coupon.startsAt && coupon.startsAt > now) throw new Error('This coupon is not active yet');
+          if (coupon.endsAt && coupon.endsAt < now) throw new Error('This coupon has expired');
+          if (coupon.usageLimit != null && coupon.usageCount >= coupon.usageLimit) throw new Error('This coupon usage limit has been reached');
+          if (Number(coupon.minimumOrderAmount || 0) > subtotal) throw new Error(`Minimum order amount for this coupon is ₹${Number(coupon.minimumOrderAmount).toFixed(2)}`);
+          if (coupon.firstOrderOnly && userId) {
+            const previousOrders = await tx.select({ id: orders.id }).from(orders).where(eq(orders.userId, userId)).limit(1);
+            if (previousOrders.length) throw new Error('This coupon is valid only on the first order');
+          }
+          if (coupon.perCustomerLimit != null && userId) {
+            const previousUses = await tx.select({ id: couponUsages.id }).from(couponUsages).where(and(eq(couponUsages.couponId, coupon.id), eq(couponUsages.userId, userId))).limit(coupon.perCustomerLimit);
+            if (previousUses.length >= coupon.perCustomerLimit) throw new Error('You have already used this coupon');
+          }
+          const raw = coupon.discountType === 'fixed' ? Number(coupon.discountValue) : subtotal * Number(coupon.discountValue) / 100;
+          discountAmount = Math.min(subtotal, coupon.maximumDiscountAmount == null ? raw : Math.min(raw, Number(coupon.maximumDiscountAmount)));
+          appliedPromoCode = coupon.code;
+          appliedCouponId = coupon.id;
+        } else {
+          const promotion = promotions.find((p: any) => p?.active && typeof p?.code === 'string' && p.code.trim().toUpperCase() === promoCode);
+          if (!promotion) throw new Error('Invalid or inactive promotion code');
+          if (promotion.expiry) {
+            const expiryTime = new Date(promotion.expiry).getTime();
+            if (!Number.isNaN(expiryTime) && expiryTime < Date.now()) throw new Error('This promotion code has expired');
+          }
+          let value = Math.max(0, Number(promotion.discountValue || 0));
+          let discountType = promotion.discountType || 'percentage';
+          if (!value && typeof promotion.message === 'string') {
+            const percentMatch = promotion.message.match(/(\d+(?:\.\d+)?)\s*%/);
+            if (percentMatch) { value = Number(percentMatch[1]); discountType = 'percentage'; }
+          }
+          discountAmount = discountType === 'fixed' ? Math.min(value, subtotal) : Math.min(subtotal, subtotal * Math.min(value, 100) / 100);
+          appliedPromoCode = promotion.code?.trim().toUpperCase() ?? null;
+        }
+      }
+
+      if (loyaltyPointsRedeemed > 0 && userId) {
+        const [account] = await tx.select().from(loyaltyAccounts).where(eq(loyaltyAccounts.userId, userId)).limit(1);
+        if (!account || loyaltyPointsRedeemed > account.pointsBalance) throw new Error('Insufficient loyalty points');
+        // 100 points = ₹10 (10 points = ₹1).
+        loyaltyDiscountAmount = Math.min(Math.floor(loyaltyPointsRedeemed / 10), Math.max(0, subtotal - discountAmount));
+        loyaltyPointsRedeemed = loyaltyDiscountAmount * 10;
+      } else { loyaltyPointsRedeemed = 0; }
+
+      const taxableSubtotal = Math.max(0, subtotal - discountAmount - loyaltyDiscountAmount);
+      const shippingCost = await this.calculateShippingCost(tx, orderData.shippingAddress, taxableSubtotal, items);
+      const taxRate = Math.max(0, Number(gstPolicy.rate ?? 0)) / 100;
+      const taxAmount = taxableSubtotal * taxRate;
+      const preGiftCardTotal = taxableSubtotal + shippingCost + taxAmount;
+      if (orderData.giftCardCode) {
+        const giftCode = String(orderData.giftCardCode).trim().toUpperCase();
+        const [card] = await tx.select().from(giftCards).where(eq(giftCards.code, giftCode)).limit(1);
+        if (!card || !card.active || (card.expiresAt && card.expiresAt < new Date()) || Number(card.remainingAmount) <= 0) throw new Error('Invalid or expired gift card');
+        giftCardDiscountAmount = Math.min(Number(card.remainingAmount), preGiftCardTotal);
+        appliedGiftCardId = card.id;
+      }
+      const total = Math.max(0, preGiftCardTotal - giftCardDiscountAmount);
+      const paymentMethod = orderData.paymentMethod === 'cod' ? 'cod' : 'razorpay';
+
+      if (paymentMethod === 'cod' && siteConfig?.orderSettings?.codEnabled !== true) {
+        throw new Error('Cash on Delivery is currently unavailable');
+      }
       
       // Create order with server-calculated totals
       const secureOrderData: InsertOrder = {
@@ -1339,8 +2002,13 @@ export class DatabaseStorage implements IStorage {
         taxAmount: taxAmount.toFixed(2),
         total: total.toFixed(2),
         status: 'pending',
-        paymentStatus: 'pending',
-        notes: orderData.notes
+        paymentStatus: paymentMethod === 'cod' ? 'pending' : 'pending',
+        paymentMethod,
+        couponDiscount: discountAmount.toFixed(2),
+        giftCardDiscount: giftCardDiscountAmount.toFixed(2),
+        loyaltyPointsRedeemed,
+        invoiceNumber: `BMAA-${new Date().getFullYear()}-${cryptoRandomOrderNumber()}`,
+        notes: [orderData.notes, appliedPromoCode ? `Promotion: ${appliedPromoCode} (discount ₹${discountAmount.toFixed(2)})` : null].filter(Boolean).join('\n') || null
       };
       
       const [newOrder] = await tx.insert(orders).values(secureOrderData).returning();
@@ -1352,12 +2020,47 @@ export class DatabaseStorage implements IStorage {
         );
       }
       
+      if (appliedCouponId) {
+        await tx.insert(couponUsages).values({ couponId: appliedCouponId, userId: userId || undefined, orderId: newOrder.id, customerEmail: orderData.customerEmail, discountAmount: discountAmount.toFixed(2) });
+        await tx.update(coupons).set({ usageCount: sql`${coupons.usageCount} + 1`, updatedAt: new Date() }).where(eq(coupons.id, appliedCouponId));
+      }
+
+      if (loyaltyPointsRedeemed > 0 && userId) {
+        const loyaltyUpdated = await tx.update(loyaltyAccounts).set({ pointsBalance: sql`${loyaltyAccounts.pointsBalance} - ${loyaltyPointsRedeemed}`, updatedAt: new Date() }).where(and(eq(loyaltyAccounts.userId, userId), sql`${loyaltyAccounts.pointsBalance} >= ${loyaltyPointsRedeemed}`)).returning({ id: loyaltyAccounts.id });
+        if (!loyaltyUpdated.length) throw new Error('Insufficient loyalty points');
+        await tx.insert(loyaltyTransactions).values({ userId, points: -loyaltyPointsRedeemed, type: 'redemption', description: `Redeemed on order ${newOrder.id.slice(-8).toUpperCase()}`, orderId: newOrder.id });
+      }
+      if (appliedGiftCardId && giftCardDiscountAmount > 0) {
+        const giftUpdated = await tx.update(giftCards).set({ remainingAmount: sql`${giftCards.remainingAmount} - ${giftCardDiscountAmount}`, updatedAt: new Date() }).where(and(eq(giftCards.id, appliedGiftCardId), sql`${giftCards.remainingAmount} >= ${giftCardDiscountAmount}`)).returning({ id: giftCards.id });
+        if (!giftUpdated.length) throw new Error('Gift card balance changed. Please try again.');
+        await tx.insert(giftCardTransactions).values({ giftCardId: appliedGiftCardId, orderId: newOrder.id, amount: giftCardDiscountAmount.toFixed(2), type: 'redeem' });
+      }
+
       // Atomic stock decrement with conditional UPDATE to prevent overselling
       for (const item of validatedItems) {
-        // Use conditional UPDATE WHERE inStock >= requestedQuantity to prevent overselling
+        // Update the exact variant stock when this order line is variant-backed.
+        if (item.variantId) {
+          const variantUpdateResult = await tx
+            .update(productVariants)
+            .set({
+              stockQuantity: sql`${productVariants.stockQuantity} - ${item.quantity}`,
+              updatedAt: new Date()
+            })
+            .where(and(
+              eq(productVariants.id, item.variantId),
+              sql`${productVariants.stockQuantity} >= ${item.quantity}`
+            ))
+            .returning({ id: productVariants.id, newStock: productVariants.stockQuantity });
+
+          if (variantUpdateResult.length === 0) {
+            throw new Error(`Failed to reserve variant stock for ${item.productName}. Insufficient inventory or concurrent order conflict.`);
+          }
+        }
+        
+        // Always update product-level stock as well (for total tracking)
         const updateResult = await tx
           .update(products)
-          .set({ 
+          .set({
             inStock: sql`${products.inStock} - ${item.quantity}`,
             updatedAt: new Date()
           })
@@ -1414,6 +2117,13 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(orders).where(eq(orders.customerEmail, email)).orderBy(desc(orders.createdAt));
   }
 
+  async getOrderWithItems(orderId: string): Promise<(Order & { items: OrderItem[] }) | undefined> {
+    const order = await this.getOrder(orderId);
+    if (!order) return undefined;
+    const items = await this.getOrderItems(orderId);
+    return { ...order, items };
+  }
+
   async getOrderItems(orderId: string): Promise<OrderItem[]> {
     return await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
   }
@@ -1425,6 +2135,42 @@ export class DatabaseStorage implements IStorage {
       .where(eq(orders.id, id))
       .returning();
     return updated;
+  }
+
+  async cancelOrderByCustomer(id: string, userId: string, reason: string): Promise<Order | undefined> {
+    return await db.transaction(async (tx) => {
+      const [order] = await tx.select().from(orders).where(and(eq(orders.id, id), eq(orders.userId, userId)));
+      if (!order || ['shipped', 'delivered', 'cancelled'].includes(order.status)) return undefined;
+
+      const items = await tx.select().from(orderItems).where(eq(orderItems.orderId, id));
+      for (const item of items) {
+        if (item.size || item.color) {
+          await tx.update(productVariants)
+            .set({ stockQuantity: sql`${productVariants.stockQuantity} + ${item.quantity}`, updatedAt: new Date() })
+            .where(and(eq(productVariants.productId, item.productId), item.size ? eq(productVariants.size, item.size) : sql`true`, item.color ? eq(productVariants.color, item.color) : sql`true`));
+        }
+        const [product] = await tx.select({ inStock: products.inStock }).from(products).where(eq(products.id, item.productId));
+        if (product) {
+          await tx.update(products).set({ inStock: sql`${products.inStock} + ${item.quantity}`, updatedAt: new Date() }).where(eq(products.id, item.productId));
+          await tx.insert(inventoryHistory).values({
+            productId: item.productId, changeType: 'return', quantityBefore: product.inStock,
+            quantityChanged: item.quantity, quantityAfter: product.inStock + item.quantity,
+            reason: 'Order cancellation', reference: id, userId
+          });
+        }
+      }
+
+      const [updated] = await tx.update(orders).set({
+        status: 'cancelled', updatedAt: new Date(),
+        notes: [order.notes, reason ? `Cancellation: ${reason}` : null].filter(Boolean).join('\n') || null
+      }).where(eq(orders.id, id)).returning();
+
+      await tx.insert(orderStatusHistory).values({
+        orderId: id, previousStatus: order.status, newStatus: 'cancelled',
+        changedBy: userId, reason, isSystemChange: false
+      });
+      return updated;
+    });
   }
 
   async updateOrderPaymentStatus(id: string, paymentStatus: string): Promise<Order | undefined> {
@@ -1689,7 +2435,7 @@ export class DatabaseStorage implements IStorage {
           hasTracking
         },
         availableStatuses: availableStatuses.map(s => s.status),
-        availablePaymentMethods: availablePaymentMethods.map(pm => pm.paymentMethod),
+        availablePaymentMethods: availablePaymentMethods.map(pm => pm.paymentMethod).filter((pm): pm is string => typeof pm === "string"),
         dateRange: {
           earliest: dateRange.earliest,
           latest: dateRange.latest
@@ -1857,7 +2603,7 @@ export class DatabaseStorage implements IStorage {
         changedByName: sql<string>`COALESCE(${users.firstName} || ' ' || ${users.lastName}, 'System')`,
         reason: orderStatusHistory.reason,
         notes: orderStatusHistory.notes,
-        isSystemChange: orderStatusHistory.isSystemChange,
+        isSystemChange: orderStatusHistory.isSystemChange ?? false,
         createdAt: orderStatusHistory.createdAt
       })
       .from(orderStatusHistory)
@@ -1874,7 +2620,7 @@ export class DatabaseStorage implements IStorage {
       changedByName: history.changedByName,
       reason: history.reason,
       notes: history.notes,
-      isSystemChange: history.isSystemChange,
+      isSystemChange: history.isSystemChange ?? false,
       createdAt: history.createdAt!.toISOString()
     }));
   }
@@ -2534,24 +3280,19 @@ export class DatabaseStorage implements IStorage {
     const totalCountResult = await countQuery;
     const total = totalCountResult[0]?.count || 0;
     
-    // Get products with sorting and pagination
-    let productsQuery = db.select().from(products);
-    if (conditions.length > 0) {
-      productsQuery = productsQuery.where(and(...conditions));
-    }
-    
-    // Apply sorting
-    if (sortBy === 'name') {
-      productsQuery = productsQuery.orderBy(sortOrder === 'desc' ? desc(products.name) : asc(products.name));
-    } else if (sortBy === 'inStock') {
-      productsQuery = productsQuery.orderBy(sortOrder === 'desc' ? desc(products.inStock) : asc(products.inStock));
-    } else if (sortBy === 'category') {
-      productsQuery = productsQuery.orderBy(sortOrder === 'desc' ? desc(products.category) : asc(products.category));
-    } else if (sortBy === 'updatedAt') {
-      productsQuery = productsQuery.orderBy(sortOrder === 'desc' ? desc(products.updatedAt) : asc(products.updatedAt));
-    }
-    
-    const productsResult = await productsQuery.limit(limit).offset(offset);
+    // Get products with filtering, sorting and pagination in one typed query chain.
+    const sortExpression = sortBy === 'name'
+      ? (sortOrder === 'desc' ? desc(products.name) : asc(products.name))
+      : sortBy === 'inStock'
+        ? (sortOrder === 'desc' ? desc(products.inStock) : asc(products.inStock))
+        : sortBy === 'category'
+          ? (sortOrder === 'desc' ? desc(products.category) : asc(products.category))
+          : (sortOrder === 'desc' ? desc(products.updatedAt) : asc(products.updatedAt));
+    const productsResult = await db.select().from(products)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(sortExpression)
+      .limit(limit)
+      .offset(offset);
     
     // Calculate reserved stock (simplified - in real implementation would check pending orders)
     const reservedStockMap = new Map(); // product_id -> reserved_amount
@@ -2692,7 +3433,7 @@ export class DatabaseStorage implements IStorage {
         supplier: product.supplier,
         lastRestockDate: null, // Would calculate from inventory history
         avgDailyUsage,
-        status: alert.status,
+        status: alert.status ?? "active",
         notifiedAt: alert.notifiedAt?.toISOString() || new Date().toISOString(),
         resolvedAt: alert.resolvedAt?.toISOString() || null,
       };
@@ -2819,7 +3560,7 @@ export class DatabaseStorage implements IStorage {
         finalStatus,
         successCount,
         failureCount,
-        errorLog
+        errorLog || undefined
       );
       
       return updatedOperation || bulkOperation;
@@ -2932,8 +3673,8 @@ export class DatabaseStorage implements IStorage {
       adminUserName: row.user ? `${row.user.firstName} ${row.user.lastName}` : null,
       bulkOperationId: row.history.bulkOperationId,
       bulkOperationDescription: row.bulkOp?.description || null,
-      isSystemChange: row.history.isSystemChange,
-      metadata: row.history.metadata,
+      isSystemChange: row.history.isSystemChange ?? false,
+      metadata: (row.history.metadata && typeof row.history.metadata === "object" && !Array.isArray(row.history.metadata) ? row.history.metadata : null) as Record<string, any> | null,
       createdAt: row.history.createdAt?.toISOString() || new Date().toISOString(),
     }));
     
@@ -3010,7 +3751,7 @@ export class DatabaseStorage implements IStorage {
     
     // Convert to CSV format
     const csvHeader = headers.join(',');
-    const csvRows = data.map(row => row.map(cell => `"${cell}"`).join(','));
+    const csvRows = data.map(row => row.map((cell: unknown) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(','));
     const csvContent = [csvHeader, ...csvRows].join('\n');
     
     return csvContent;
@@ -3034,7 +3775,7 @@ export class DatabaseStorage implements IStorage {
     
     // Calculate progress
     const progress = op.totalItems > 0 ? 
-      Math.round(((op.successCount + op.failureCount) / op.totalItems) * 100) : 0;
+      Math.round((((op.successCount ?? 0) + (op.failureCount ?? 0)) / op.totalItems) * 100) : 0;
     
     return {
       id: op.id,
@@ -3043,8 +3784,8 @@ export class DatabaseStorage implements IStorage {
       adminUserId: op.adminUserId,
       adminUserName: user ? `${user.firstName} ${user.lastName}` : 'Unknown Admin',
       totalItems: op.totalItems,
-      successCount: op.successCount,
-      failureCount: op.failureCount,
+      successCount: op.successCount ?? 0,
+      failureCount: op.failureCount ?? 0,
       status: op.status,
       fileName: op.fileName,
       errorLog: op.errorLog,
@@ -3391,6 +4132,40 @@ export class DatabaseStorage implements IStorage {
       .where(sql`${notifications.createdAt} < NOW() - INTERVAL '${daysToKeep} days'`);
   }
 
+  async calculateCustomerSegment(customerId: string): Promise<string> {
+    const detail = await this.getAdminCustomerDetail(customerId);
+    return detail?.analytics?.customerSegment || "new";
+  }
+
+  async getCustomerInsights(customerId: string): Promise<any> {
+    const detail = await this.getAdminCustomerDetail(customerId);
+    if (!detail) return undefined;
+    const analytics = detail.analytics || {};
+    const riskScore = analytics.customerSegment === "inactive" || analytics.customerSegment === "at_risk" ? 75 : 20;
+    const valueScore = Math.min(100, Math.round((Number(analytics.lifetimeValue || 0) / 10000) * 100));
+    return {
+      riskScore, valueScore,
+      predictions: { nextOrderProbability: riskScore < 50 ? 60 : 20, churnRisk: riskScore, projectedLifetimeValue: Number(analytics.lifetimeValue || 0), recommendedActions: riskScore >= 50 ? ["Send a re-engagement offer"] : ["Continue personalized offers"] },
+      engagementMetrics: { emailOpenRate: null, emailClickRate: null, smsResponseRate: null, lastEngagementDate: analytics.lastEngagementDate || null },
+    };
+  }
+
+  async searchCustomers(query: string, filters?: { segment?: string; city?: string; state?: string; ltvMin?: number; ltvMax?: number; lastActivityDays?: number }): Promise<any[]> {
+    const pattern = `%${query.trim()}%`;
+    const rows = await db.select().from(users).where(and(
+      eq(users.role, "user"),
+      or(ilike(users.email, pattern), ilike(users.firstName, pattern), ilike(users.lastName, pattern))
+    )).limit(100);
+    const details = await Promise.all(rows.map(u => this.getAdminCustomerDetail(u.id)));
+    return details.filter(Boolean).filter((d: any) => {
+      const a = d.analytics || {};
+      if (filters?.segment && a.customerSegment !== filters.segment) return false;
+      if (filters?.ltvMin != null && Number(a.lifetimeValue || 0) < filters.ltvMin) return false;
+      if (filters?.ltvMax != null && Number(a.lifetimeValue || 0) > filters.ltvMax) return false;
+      return true;
+    });
+  }
+
   // Enhanced profile management operations
   async getUserPreferences(userId: string): Promise<UserPreferences | undefined> {
     const [preferences] = await db
@@ -3401,10 +4176,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createUserPreferences(preferences: InsertUserPreferences): Promise<UserPreferences> {
-    const [newPreferences] = await db
-      .insert(userPreferences)
-      .values(preferences)
-      .returning();
+    const normalized: typeof userPreferences.$inferInsert = {
+      userId: preferences.userId,
+      emailNotifications: normalizeEmailNotifications(preferences.emailNotifications),
+      smsNotifications: normalizeSmsNotifications(preferences.smsNotifications),
+      whatsappNotifications: normalizeWhatsappNotifications(preferences.whatsappNotifications),
+      privacySettings: normalizePrivacySettings(preferences.privacySettings),
+      displayPreferences: preferences.displayPreferences,
+    };
+    const [newPreferences] = await db.insert(userPreferences).values(normalized).returning();
     return newPreferences;
   }
 
@@ -3414,10 +4194,10 @@ export class DatabaseStorage implements IStorage {
     };
 
     if (preferences.emailNotifications !== undefined) {
-      updateData.emailNotifications = preferences.emailNotifications;
+      updateData.emailNotifications = normalizeEmailNotifications(preferences.emailNotifications);
     }
     if (preferences.privacySettings !== undefined) {
-      updateData.privacySettings = preferences.privacySettings;
+      updateData.privacySettings = normalizePrivacySettings(preferences.privacySettings);
     }
     if (preferences.displayPreferences !== undefined) {
       updateData.displayPreferences = preferences.displayPreferences;
@@ -4147,20 +4927,10 @@ export class DatabaseStorage implements IStorage {
     phoneNumber: string, 
     userId?: string
   ): Promise<WhatsappPreferences | undefined> {
-    let query = db.select().from(whatsappPreferences);
-    
-    if (userId) {
-      query = query.where(
-        and(
-          eq(whatsappPreferences.phoneNumber, phoneNumber),
-          eq(whatsappPreferences.userId, userId)
-        )
-      );
-    } else {
-      query = query.where(eq(whatsappPreferences.phoneNumber, phoneNumber));
-    }
-    
-    const [prefs] = await query.limit(1);
+    const preferenceCondition = userId
+      ? and(eq(whatsappPreferences.phoneNumber, phoneNumber), eq(whatsappPreferences.userId, userId))
+      : eq(whatsappPreferences.phoneNumber, phoneNumber);
+    const [prefs] = await db.select().from(whatsappPreferences).where(preferenceCondition).limit(1);
     return prefs;
   }
 
@@ -4191,7 +4961,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     // Check if preferences already exist
-    const existing = await this.getWhatsappPreferences(preferences.phoneNumber, preferences.userId);
+    const existing = await this.getWhatsappPreferences(preferences.phoneNumber ?? undefined, preferences.userId ?? undefined);
     
     if (existing) {
       // Update existing preferences
@@ -4302,6 +5072,10 @@ export class DatabaseStorage implements IStorage {
         target: [whatsappRateLimits.identifier, whatsappRateLimits.window, whatsappRateLimits.priority, whatsappRateLimits.windowStart],
         set: { count: sql`${whatsappRateLimits.count} + 1` }
       });
+  }
+
+  async updateWhatsappDeliveryStatus(twilioSid: string, data: { status: string; phoneNumber: string; errorCode?: string; errorMessage?: string; webhookData?: any }): Promise<WhatsappDeliveryLogs | undefined> {
+    return this.updateWhatsappDeliveryLogStatus(twilioSid, data.status, { ...data.webhookData, phoneNumber: data.phoneNumber, errorCode: data.errorCode, errorMessage: data.errorMessage });
   }
 
   // WhatsApp delivery log operations
@@ -4789,12 +5563,13 @@ export class DatabaseStorage implements IStorage {
     const completedOrders = ordersByStatusResult.find(row => row.status === 'delivered')?.count || 0;
     const orderCompletionRate = totalOrders > 0 ? (completedOrders / totalOrders) * 100 : 0;
 
+    const currentTimeSeries = orderTrendsResult.map(row => ({
+      date: row.date,
+      value: row.value,
+      label: new Date(row.date).toLocaleDateString()
+    }));
     return {
-      orderTrends: orderTrendsResult.map(row => ({
-        date: row.date,
-        value: row.value,
-        label: new Date(row.date).toLocaleDateString()
-      })),
+      timeSeries: currentTimeSeries,
       ordersByStatus: ordersByStatusResult.map(row => ({
         status: row.status as string,
         count: row.count,
@@ -4805,9 +5580,12 @@ export class DatabaseStorage implements IStorage {
         count: row.count,
         percentage: totalOrders > 0 ? (row.count / totalOrders) * 100 : 0
       })),
-      peakOrderingHours,
-      averageOrderProcessingTime: Math.round(processingTimeResult[0].averageProcessingHours * 100) / 100,
-      orderCompletionRate: Math.round(orderCompletionRate * 100) / 100,
+      peakHours: peakOrderingHours.map(row => ({ hour: row.hour, count: row.orderCount })),
+      trends: {
+        orderGrowth: 0,
+        averageOrderValue: totalOrders > 0 ? orderValueDistributionResult.reduce((sum, row) => sum + row.count, 0) / totalOrders : 0,
+        conversionRate: 0
+      },
       dateRange: {
         from: startDate.toISOString(),
         to: endDate.toISOString(),
@@ -4815,7 +5593,48 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async getCustomerAnalytics(query: CustomerAnalyticsQuery): Promise<CustomerAnalytics> {
+  async getCustomerAnalytics(customerId: string, dateRange: { from: string; to: string }): Promise<CustomerAnalyticsResponse>;
+  async getCustomerAnalytics(query: CustomerAnalyticsQuery): Promise<CustomerAnalytics>;
+  async getCustomerAnalytics(arg: CustomerAnalyticsQuery | string, dateRange?: { from: string; to: string }): Promise<CustomerAnalytics | CustomerAnalyticsResponse> {
+    if (typeof arg === 'string') {
+      const from = new Date(dateRange?.from || '2023-01-01');
+      const to = new Date(dateRange?.to || new Date().toISOString().split('T')[0]);
+      to.setHours(23, 59, 59, 999);
+
+      const customerOrders = await db.select({
+        id: orders.id, createdAt: orders.createdAt, total: orders.total
+      }).from(orders).where(and(eq(orders.userId, arg), eq(orders.paymentStatus, 'completed'), sql`${orders.createdAt} >= ${from}`, sql`${orders.createdAt} <= ${to}`));
+
+      const items = customerOrders.length > 0 ? await db.select({
+        productId: orderItems.productId, productName: products.name, category: products.category,
+        quantity: orderItems.quantity, totalPrice: orderItems.totalPrice, orderId: orderItems.orderId
+      }).from(orderItems).leftJoin(products, eq(orderItems.productId, products.id)).where(sql`${orderItems.orderId} IN (${sql.join(customerOrders.map(o => sql`${o.id}`), sql`, `)})`) : [];
+
+      const purchaseMap = new Map<string, { orderCount: number; revenue: number }>();
+      for (const o of customerOrders) { const key = new Date(o.createdAt || from).toISOString().slice(0,10); const v = purchaseMap.get(key) || {orderCount:0,revenue:0}; v.orderCount++; v.revenue += Number(o.total || 0); purchaseMap.set(key,v); }
+      const categoryMap = new Map<string, { orderIds:Set<string>; revenue:number }>();
+      const productMap = new Map<string, { name:string; orderIds:Set<string>; quantity:number; revenue:number }>();
+      for (const i of items) {
+        const cat = i.category || 'Uncategorized'; const cv = categoryMap.get(cat) || {orderIds:new Set<string>(),revenue:0}; cv.orderIds.add(i.orderId); cv.revenue += Number(i.totalPrice || 0); categoryMap.set(cat,cv);
+        const pv = productMap.get(i.productId) || {name:i.productName || 'Unknown Product',orderIds:new Set<string>(),quantity:0,revenue:0}; pv.orderIds.add(i.orderId); pv.quantity += Number(i.quantity || 0); pv.revenue += Number(i.totalPrice || 0); productMap.set(i.productId,pv);
+      }
+      const totalRevenue = customerOrders.reduce((sum,o)=>sum+Number(o.total||0),0);
+      const totalOrders = customerOrders.length;
+      const months = new Map<string,{orderCount:number;revenue:number}>();
+      for (const o of customerOrders) { const d=new Date(o.createdAt || from); const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; const v=months.get(key)||{orderCount:0,revenue:0}; v.orderCount++; v.revenue+=Number(o.total||0); months.set(key,v); }
+      return {
+        customerId: arg,
+        purchaseHistory: Array.from(purchaseMap.entries()).map(([date,v])=>({date,orderCount:v.orderCount,revenue:v.revenue,averageOrderValue:v.orderCount?v.revenue/v.orderCount:0})),
+        categoryBreakdown: Array.from(categoryMap.entries()).map(([category,v])=>({category,orderCount:v.orderIds.size,revenue:v.revenue,percentage:totalRevenue?v.revenue/totalRevenue*100:0})),
+        topProducts: Array.from(productMap.entries()).sort((a,b)=>b[1].revenue-a[1].revenue).slice(0,10).map(([productId,v])=>({productId,productName:v.name,orderCount:v.orderIds.size,totalQuantity:v.quantity,revenue:v.revenue})),
+        seasonalTrends: Array.from(months.entries()).map(([key,v])=>{const [year,month]=key.split('-');return {month,year:Number(year),orderCount:v.orderCount,revenue:v.revenue};}),
+        engagementMetrics:{emailOpenRate:null,emailClickRate:null,smsResponseRate:null,lastEngagementType:null,lastEngagementDate:null},
+        predictions:{nextOrderProbability: totalOrders>0?Math.min(1,totalOrders/10):0,churnRisk: totalOrders>0?Math.max(0,1-Math.min(1,totalOrders/5)):1,projectedLifetimeValue:totalRevenue,recommendedActions: totalOrders===0?['Send a welcome offer']:totalOrders>3?['Consider VIP retention offer']:['Send a repeat-purchase offer']},
+        dateRange:{from:from.toISOString(),to:to.toISOString()}
+      };
+    }
+    const query = arg;
+
     const { startDate, endDate } = this.getDateRangeFromQuery(query);
 
     // Customer acquisition trends
@@ -4858,7 +5677,7 @@ export class DatabaseStorage implements IStorage {
     const topCustomers: any[] = [];
 
     for (const customer of customerSegmentResult) {
-      const isNewCustomer = customer.createdAt >= startDate;
+      const isNewCustomer = !!customer.createdAt && customer.createdAt >= startDate;
       const isVip = customer.totalSpent > 5000 || customer.orderCount > 5;
       const isReturning = customer.orderCount > 1;
 
@@ -5621,7 +6440,7 @@ export class DatabaseStorage implements IStorage {
       alertType: alert.alertType,
       currentStock: alert.currentStock,
       threshold: alert.threshold,
-      status: alert.status,
+      status: alert.status ?? "active",
       createdAt: alert.createdAt ? alert.createdAt.toISOString() : new Date().toISOString()
     }));
 
@@ -5679,10 +6498,10 @@ export class DatabaseStorage implements IStorage {
           paymentStatus: orders.paymentStatus,
           paymentMethod: orders.paymentMethod,
           total: orders.total,
-          tax: orders.tax,
+          tax: orders.taxAmount,
           shippingCost: orders.shippingCost,
           shippingAddress: orders.shippingAddress,
-          billingAddress: orders.billingAddress,
+          billingAddress: orders.shippingAddress,
           fulfillmentStatus: orders.status,
           razorpayOrderId: orders.razorpayOrderId,
           razorpayPaymentId: orders.razorpayPaymentId,
@@ -5734,24 +6553,24 @@ export class DatabaseStorage implements IStorage {
 
         // Get order items if requested
         if (params.includeItems) {
-          const orderItems = await db
+          const orderItemRows = await db
             .select({
               productName: sql<string>`COALESCE(${products.name}, 'Unknown Product')`,
               quantity: orderItems.quantity,
-              unitPrice: orderItems.unitPrice,
+              unitPrice: orderItems.productPrice,
               totalPrice: orderItems.totalPrice
             })
             .from(orderItems)
             .leftJoin(products, eq(orderItems.productId, products.id))
             .where(eq(orderItems.orderId, order.orderId));
 
-          const itemsText = orderItems.map(item => 
+          const itemsText = orderItemRows.map(item => 
             `${item.productName} x${item.quantity} @ $${parseFloat(item.unitPrice).toFixed(2)}`
           ).join('; ');
           
           orderData.items = itemsText;
-          orderData.quantities = orderItems.map(item => item.quantity).join('; ');
-          orderData.itemPrices = orderItems.map(item => parseFloat(item.unitPrice).toFixed(2)).join('; ');
+          orderData.quantities = orderItemRows.map(item => item.quantity).join('; ');
+          orderData.itemPrices = orderItemRows.map(item => parseFloat(item.unitPrice).toFixed(2)).join('; ');
         }
 
         orderData.notes = order.notes || '';
@@ -5876,7 +6695,7 @@ export class DatabaseStorage implements IStorage {
         const lifetimeValue = customerOrders.reduce((sum, order) => sum + parseFloat(order.total), 0);
         const averageOrderValue = totalOrders > 0 ? lifetimeValue / totalOrders : 0;
         const lastOrderDate = customerOrders.length > 0 
-          ? Math.max(...customerOrders.map(o => new Date(o.createdAt).getTime()))
+          ? Math.max(...customerOrders.map(o => new Date(o.createdAt ?? 0).getTime()))
           : null;
 
         let customerData: any = {
@@ -6045,12 +6864,12 @@ export class DatabaseStorage implements IStorage {
         };
 
         // Add selected metrics
-        if (params.metrics.includes('average_order_value')) {
+        if (params.metrics.includes('averageOrderValue')) {
           const aov = ordersCount > 0 ? totalRevenue / ordersCount : 0;
           analyticsData.averageOrderValue = aov.toFixed(2);
         }
 
-        if (params.metrics.includes('retention_rate')) {
+        if (params.metrics.includes('retentionRate')) {
           // Simplified retention calculation
           analyticsData.retentionRate = '85%'; // Placeholder - would need more complex calculation
         }
@@ -6072,7 +6891,7 @@ export class DatabaseStorage implements IStorage {
     const csvRows = [headers.join(',')];
     
     for (const row of data) {
-      const csvRow = params.fields.map(field => this.escapeCSVValue(row[field] || ''));
+      const csvRow = (params.fields ?? []).map(field => this.escapeCSVValue(row[field] || ''));
       csvRows.push(csvRow.join(','));
     }
     
@@ -6084,7 +6903,7 @@ export class DatabaseStorage implements IStorage {
     const csvRows = [headers.join(',')];
     
     for (const row of data) {
-      const csvRow = params.fields.map(field => this.escapeCSVValue(row[field] || ''));
+      const csvRow = (params.fields ?? []).map(field => this.escapeCSVValue(row[field] || ''));
       csvRows.push(csvRow.join(','));
     }
     
@@ -6096,7 +6915,7 @@ export class DatabaseStorage implements IStorage {
     const csvRows = [headers.join(',')];
     
     for (const row of data) {
-      const csvRow = params.fields.map(field => this.escapeCSVValue(row[field] || ''));
+      const csvRow = (params.fields ?? []).map(field => this.escapeCSVValue(row[field] || ''));
       csvRows.push(csvRow.join(','));
     }
     
@@ -6104,11 +6923,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async generateInventoryCSV(data: any[], params: InventoryExport): Promise<string> {
-    const headers = this.generateCSVHeaders(params.fields, 'inventory');
+    const headers = this.generateCSVHeaders(params.fields ?? [], 'inventory');
     const csvRows = [headers.join(',')];
     
     for (const row of data) {
-      const csvRow = params.fields.map(field => this.escapeCSVValue(row[field] || ''));
+      const csvRow = (params.fields ?? []).map(field => this.escapeCSVValue(row[field] || ''));
       csvRows.push(csvRow.join(','));
     }
     
@@ -6199,6 +7018,14 @@ export class DatabaseStorage implements IStorage {
     return testData;
   }
 
+  async generateCSV(data: any[]): Promise<string> {
+    if (!data.length) return "";
+    const headers = Object.keys(data[0]);
+    const rows = [headers.map(h => this.escapeCSVValue(h)).join(",")];
+    for (const row of data) rows.push(headers.map(h => this.escapeCSVValue(row[h])).join(","));
+    return rows.join("\n");
+  }
+
   async generateTestCSV(data: any[], type: string): Promise<string> {
     if (data.length === 0) return '';
     
@@ -6227,7 +7054,7 @@ export class DatabaseStorage implements IStorage {
     return stringValue;
   }
 
-  formatDateForCSV(date: Date | string, timezone = 'Asia/Kolkata'): string {
+  formatDateForCSV(date: Date | string | null | undefined, timezone = 'Asia/Kolkata'): string {
     const dateObj = typeof date === 'string' ? new Date(date) : date;
     if (!dateObj || isNaN(dateObj.getTime())) return '';
     
@@ -6744,17 +7571,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getNotificationHistory(params: any): Promise<NotificationHistory[]> {
-    let query = db.select().from(notificationHistory);
-    
-    if (params.status) {
-      query = query.where(eq(notificationHistory.status, params.status));
-    }
-    
-    if (params.channels) {
-      query = query.where(sql`${notificationHistory.channels} && ${params.channels}`);
-    }
-    
-    return await query.orderBy(desc(notificationHistory.createdAt)).limit(params.limit || 50);
+    const conditions = [];
+    if (params.status) conditions.push(eq(notificationHistory.status, params.status));
+    if (params.channels) conditions.push(sql`${notificationHistory.channels} && ${params.channels}`);
+    return await db.select().from(notificationHistory)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(notificationHistory.createdAt))
+      .limit(params.limit || 50);
   }
 
   async createNotificationHistory(history: InsertNotificationHistory): Promise<NotificationHistory> {
@@ -6766,39 +7589,50 @@ export class DatabaseStorage implements IStorage {
     return newHistory;
   }
 
-  async sendBulkNotifications(request: BulkNotificationRequest): Promise<BulkNotificationResult> {
-    // Create notification history record
+  async sendBulkNotifications(request: BulkNotificationRequest, adminUserId: string): Promise<BulkNotificationResult> {
+    const groups = await Promise.all(request.recipientGroups.map(id => this.getRecipientGroup(id)));
+    const validGroups = groups.filter(Boolean) as RecipientGroup[];
+    if (!validGroups.length) throw new Error('No valid recipient groups selected');
+
+    const usersResult = await db.select({ id: users.id, email: users.email, emailVerified: users.emailVerified, firstName: users.firstName, lastName: users.lastName, phoneNumber: users.phoneNumber }).from(users).where(eq(users.role, 'user'));
+    const recipients = usersResult.filter(u => validGroups.some(g => {
+      const c: any = g.criteria || {};
+      if (c.emailVerified === true && !u.email) return false;
+      if (c.emailVerified === true && u.emailVerified !== true) return false;
+      if (c.hasPhone === true && !u.phoneNumber) return false;
+      return true;
+    }));
+    const unique = Array.from(new Map(recipients.map(u => [u.id, u])).values());
+    const unsupported = request.channels.filter(c => c !== 'email');
+    const emailEnabled = request.channels.includes('email');
+    let successCount = 0;
+    let failureCount = 0;
+
     const history = await this.createNotificationHistory({
-      subject: request.subject,
-      message: request.message,
-      channels: request.channels,
-      status: 'queued',
-      recipientCount: 0, // Will be updated after processing
-      createdBy: 'admin-user-id', // Would come from auth context
+      subject: request.subject, message: request.message, channels: request.channels,
+      status: emailEnabled ? 'sending' : 'failed', recipientCount: unique.length,
+      createdBy: adminUserId,
+      scheduledAt: request.scheduleAt ? new Date(request.scheduleAt) : new Date(),
     });
 
-    // Process recipients and queue notifications
-    // This would integrate with existing email, SMS, and WhatsApp services
-    const estimatedRecipients = 100; // Mock recipient count
-    
-    // Update notification history with recipient count
-    await db
-      .update(notificationHistory)
-      .set({
-        recipientCount: estimatedRecipients,
-        status: 'sending',
-        updatedAt: new Date(),
-      })
-      .where(eq(notificationHistory.id, history.id));
-
-    return {
-      id: history.id,
-      status: 'queued',
-      recipientCount: estimatedRecipients,
-      successCount: 0,
-      failureCount: 0,
-      estimatedDeliveryTime: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutes
-    };
+    if (emailEnabled) {
+      for (const recipient of unique) {
+        try {
+          await this.enqueueEmail({
+            type: 'promotional', priority: request.priority, status: 'pending',
+            to: recipient.email, from: process.env.SMTP_EMAIL || 'no-reply@bmaafashion.com',
+            recipientName: [recipient.firstName, recipient.lastName].filter(Boolean).join(' ') || recipient.email,
+            subject: request.subject, htmlContent: `<div>${request.message.replace(/\n/g, '<br/>')}</div>`,
+            textContent: request.message, userId: recipient.id, retryCount: 0, maxRetries: 3,
+            scheduledAt: request.scheduleAt ? new Date(request.scheduleAt) : new Date(),
+          });
+          successCount++;
+        } catch { failureCount++; }
+      }
+    }
+    const status = !emailEnabled ? 'failed' : failureCount ? 'partially_failed' : 'queued';
+    await db.update(notificationHistory).set({ status, successCount, failureCount, updatedAt: new Date(), deliveryStats: { unsupportedChannels: unsupported } }).where(eq(notificationHistory.id, history.id));
+    return { id: history.id, status, recipientCount: unique.length, successCount, failureCount, estimatedDeliveryTime: new Date(Date.now() + 5 * 60 * 1000).toISOString(), errors: unsupported.length ? [`Not configured in this build: ${unsupported.join(', ')}`] : undefined };
   }
 
   async retryNotification(id: string): Promise<NotificationHistory | undefined> {
@@ -6875,9 +7709,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async calculateRecipientGroupSize(criteria: any): Promise<number> {
-    // Mock calculation - would implement based on actual criteria
-    const totalUsers = await db.select({ count: sql<number>`count(*)` }).from(users);
-    return Math.floor((totalUsers[0]?.count || 0) * 0.3); // Mock 30% of users
+    const c = criteria || {};
+    let conditions: any[] = [eq(users.role, 'user')];
+    if (c.emailVerified === true) conditions.push(eq(users.emailVerified, true));
+    if (c.hasPhone === true) conditions.push(sql`${users.phoneNumber} IS NOT NULL AND ${users.phoneNumber} <> ''`);
+    const result = await db.select({ count: sql<number>`count(*)` }).from(users).where(and(...conditions));
+    return Number(result[0]?.count || 0);
   }
 
   // Admin Customer Management Methods
@@ -7425,12 +8262,59 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertSiteSettings(data: InsertSiteSettings): Promise<SiteSettings> {
+    const {
+      customBanners: _customBanners,
+      promotions: _promotions,
+      policies: _policies,
+      contactInfo: _contactInfo,
+      socialLinks: _socialLinks,
+      footerSettings: _footerSettings,
+      seoSettings: _seoSettings,
+      pageBanners: _pageBanners,
+      maintenanceMode: _maintenanceMode,
+      whatsappWidget: _whatsappWidget,
+      homepageSections: _homepageSections,
+      popupSettings: _popupSettings,
+      countdownTimer: _countdownTimer,
+      announcementBar: _announcementBar,
+      trustBadges: _trustBadges,
+      productSettings: _productSettings,
+      orderSettings: _orderSettings,
+      trackingSettings: _trackingSettings,
+      cookieConsent: _cookieConsent,
+      ...siteSettingsData
+    } = data;
+    const values: typeof siteSettings.$inferInsert = {
+      ...siteSettingsData,
+      id: 1,
+      featuredCategories: data.featuredCategories == null ? null : Array.from(data.featuredCategories).map(String),
+      customBanners: normalizeCustomBanners(_customBanners),
+      promotions: normalizePromotions(_promotions),
+      policies: normalizeSitePolicies(_policies),
+      contactInfo: normalizeContactInfo(_contactInfo),
+      socialLinks: normalizeSocialLinks(_socialLinks),
+      footerSettings: normalizeFooterSettings(_footerSettings),
+      seoSettings: normalizeSeoSettings(_seoSettings),
+      pageBanners: normalizePageBanners(_pageBanners),
+      maintenanceMode: normalizeMaintenanceMode(_maintenanceMode),
+      whatsappWidget: normalizeWhatsappWidget(_whatsappWidget),
+      homepageSections: normalizeHomepageSections(_homepageSections),
+      popupSettings: normalizePopupSettings(_popupSettings),
+      countdownTimer: normalizeCountdownTimer(_countdownTimer),
+      announcementBar: normalizeAnnouncementBar(_announcementBar),
+      trustBadges: normalizeTrustBadges(_trustBadges),
+      productSettings: normalizeProductSettings(_productSettings),
+      orderSettings: normalizeOrderSettings(_orderSettings),
+      trackingSettings: normalizeTrackingSettings(_trackingSettings),
+      cookieConsent: normalizeCookieConsent(_cookieConsent),
+    };
+    const { id: _id, ...updateValues } = values;
     const [result] = await db
       .insert(siteSettings)
-      .values({ id: 1, ...data })
+      .values(values)
       .onConflictDoUpdate({
         target: siteSettings.id,
-        set: { ...data, updatedAt: new Date() },
+        set: { ...updateValues, updatedAt: new Date() },
       })
       .returning();
     return result;

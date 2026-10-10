@@ -53,14 +53,14 @@ export default function FreshProduce({ onAddToCart, onViewProductDetails }: Fres
     }
   ], []);
 
-  const { pageBanners } = useSiteSettings();
+  const { pageBanners, seoSettings } = useSiteSettings();
   const banner = pageBanners?.freshProduce;
   const bannerTitle = banner?.title || "Dress Collections";
   const bannerSubtitle = banner?.subtitle || "Curated dress collections for every occasion. Premium fabrics, exclusive designs, and timeless elegance. Discover your perfect style.";
 
   useSEO({
-    title: "Premium Dress Collections | Fashion Boutique | Bmaafashion",
-    description: "Shop exclusive dress collections with premium fabrics and exquisite designs. From casual to formal wear, find the perfect dress for every occasion.",
+    title: seoSettings?.freshProduce?.title || "Premium Dress Collections | Fashion Boutique | Bmaafashion",
+    description: seoSettings?.freshProduce?.description || "Shop exclusive dress collections with premium fabrics and exquisite designs. From casual to formal wear, find the perfect dress for every occasion.",
     ogTitle: "Dress Collections - Bmaafashion Boutique",
     ogDescription: "Premium dress collections with exclusive designs and high-quality fabrics. Shop seasonal collections and timeless classics.",
     ogImage: "/attached_assets/bmaafashion.jpeg",

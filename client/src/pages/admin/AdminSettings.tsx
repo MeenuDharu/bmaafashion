@@ -74,7 +74,8 @@ const settingsSchema = z.object({
   // Policies
   policies: z.object({
     shipping: z.object({
-      freeThreshold: z.coerce.number().optional(),
+      freeThreshold: z.coerce.number().min(0).optional(),
+      shippingCost: z.coerce.number().min(0).optional(),
       deliveryDays: z.string().optional(),
       text: z.string().optional(),
     }).optional(),
@@ -116,6 +117,8 @@ const settingsSchema = z.object({
     id: z.string(),
     message: z.string().min(1, "Message is required"),
     code: z.string().optional(),
+    discountType: z.enum(["percentage", "fixed"]).optional(),
+    discountValue: z.coerce.number().min(0).optional(),
     expiry: z.string().optional(),
     active: z.boolean(),
     bgColor: z.string().optional(),
@@ -385,7 +388,7 @@ const defaultValues: SettingsForm = {
   featuredCategories: [],
   customBanners: [],
   policies: {
-    shipping: { freeThreshold: 5000, deliveryDays: "5-7 business days", text: "" },
+    shipping: { freeThreshold: 5000, shippingCost: 100, deliveryDays: "5-7 business days", text: "" },
     returns: { windowDays: 7, text: "" },
     gst: { rate: 18, text: "" },
   },
@@ -1131,6 +1134,13 @@ function AdminSettingsContent() {
                           <FormMessage />
                         </FormItem>
                       )} />
+                      <FormField control={form.control} name="policies.shipping.shippingCost" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Standard Shipping Cost (₹)</FormLabel>
+                          <FormControl><Input type="number" min="0" step="0.01" {...field} value={field.value ?? 0} /></FormControl>
+                          <p className="text-xs text-muted-foreground">Applied when the order is below the free-shipping threshold.</p>
+                        </FormItem>
+                      )} />
                       <FormField control={form.control} name="policies.shipping.deliveryDays" render={({ field }) => (
                         <FormItem>
                           <FormLabel>Estimated Delivery Time</FormLabel>
@@ -1318,7 +1328,7 @@ function AdminSettingsContent() {
                       type="button"
                       variant="outline"
                       size="default"
-                      onClick={() => appendPromo({ id: Date.now().toString(), message: "", code: "", expiry: "", active: true, bgColor: "#fef3c7", textColor: "#92400e" })}
+                      onClick={() => appendPromo({ id: Date.now().toString(), message: "", code: "", discountType: "percentage", discountValue: 0, expiry: "", active: true, bgColor: "#fef3c7", textColor: "#92400e" })}
                     >
                       <Plus className="h-4 w-4 mr-1" />Add Promotion
                     </Button>
@@ -1354,6 +1364,23 @@ function AdminSettingsContent() {
                               <FormControl><Input {...field} value={field.value ?? ""} placeholder="GREEN15" /></FormControl>
                             </FormItem>
                           )} />
+                          <div className="grid grid-cols-2 gap-3">
+                            <FormField control={form.control} name={`promotions.${index}.discountType`} render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Discount Type</FormLabel>
+                                <Select value={field.value || "percentage"} onValueChange={field.onChange}>
+                                  <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                                  <SelectContent><SelectItem value="percentage">Percentage (%)</SelectItem><SelectItem value="fixed">Fixed (₹)</SelectItem></SelectContent>
+                                </Select>
+                              </FormItem>
+                            )} />
+                            <FormField control={form.control} name={`promotions.${index}.discountValue`} render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Discount Value</FormLabel>
+                                <FormControl><Input type="number" min="0" step="0.01" {...field} value={field.value ?? 0} /></FormControl>
+                              </FormItem>
+                            )} />
+                          </div>
                           <FormField control={form.control} name={`promotions.${index}.expiry`} render={({ field }) => (
                             <FormItem>
                               <FormLabel>Expiry Date (optional)</FormLabel>

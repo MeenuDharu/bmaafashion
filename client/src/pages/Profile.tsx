@@ -72,6 +72,11 @@ type UpdateProfileData = z.infer<typeof updateProfileSchema>;
 type ChangePasswordData = z.infer<typeof changePasswordSchema>;
 type DeleteAccountData = z.infer<typeof deleteAccountSchema>;
 
+type ProfilePreferences = UserPreferences & {
+  emailNotifications?: { orderUpdates?: boolean; promotions?: boolean; stockAlerts?: boolean; newsletter?: boolean };
+  privacySettings?: { profileVisibility?: string; showOrderHistory?: boolean; shareActivityData?: boolean };
+};
+
 interface PersonalInfoTabProps {
   user: UserType;
   isEditing: boolean;
@@ -446,7 +451,7 @@ function PersonalInfoTab({
   );
 }
 
-function AccountSettingsTab({ user }: { user: UserType }) {
+function AccountSettingsTab({ user, setIsEditing }: { user: UserType; setIsEditing: (editing: boolean) => void }) {
   const { toast } = useToast();
   const authenticatedFetch = useAuthenticatedFetch();
   const queryClient = useQueryClient();
@@ -457,7 +462,7 @@ function AccountSettingsTab({ user }: { user: UserType }) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Fetch user preferences
-  const { data: preferences } = useQuery<UserPreferences>({
+  const { data: preferences } = useQuery<ProfilePreferences>({
     queryKey: ['/api/user/preferences'],
     queryFn: async () => {
       const response = await authenticatedFetch('/api/user/preferences');
@@ -586,7 +591,7 @@ function AccountSettingsTab({ user }: { user: UserType }) {
     const updatedPreferences = {
       ...preferences,
       [section]: {
-        ...preferences[section as keyof UserPreferences],
+        ...(preferences[section as keyof UserPreferences] as Record<string, unknown> | null | undefined),
         [key]: value,
       },
     };
@@ -1892,7 +1897,7 @@ function OrderHistoryTab({ user }: { user: UserType }) {
                           Order #{order.id.slice(-8).toUpperCase()}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          {new Date(order.createdAt).toLocaleDateString('en-IN')}
+                          {new Date(order.createdAt ?? Date.now()).toLocaleDateString('en-IN')}
                         </p>
                       </div>
                     </div>
@@ -2106,7 +2111,7 @@ export default function Profile() {
           </TabsContent>
 
           <TabsContent value="settings" data-testid="tab-content-settings">
-            <AccountSettingsTab user={user} />
+            <AccountSettingsTab user={user} setIsEditing={setIsEditing} />
           </TabsContent>
 
           <TabsContent value="addresses" data-testid="tab-content-addresses">

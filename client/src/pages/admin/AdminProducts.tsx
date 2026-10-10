@@ -3,10 +3,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { 
-  Plus, 
-  Edit, 
-  Trash2, 
+import {
+  Plus,
+  Edit,
+  Trash2,
   Search,
   Package,
   Filter,
@@ -19,13 +19,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from "@/components/ui/table";
 import {
   Dialog,
@@ -54,7 +54,9 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuthenticatedFetch } from "@/context/AuthContext";
 import AdminRoute from "@/components/AdminRoute";
+import ProductVariantsManager from "@/components/ProductVariantsManager";
 import type { Product, Category } from "@shared/schema";
+import { isSizeRequired } from "@/lib/size-utils";
 
 // Preset unit options
 const UNIT_OPTIONS = [
@@ -71,12 +73,12 @@ const UNIT_OPTIONS = [
   "per unit",
 ];
 
-const productFormSchema = z.object({
+// Base schema without size validation
+const baseProductFormSchema = z.object({
   name: z.string().min(1, "Product name is required"),
   description: z.string().min(1, "Description is required"),
   price: z.string().min(1, "Price is required"),
   unit: z.string().min(1, "Unit is required"),
-  size: z.string().optional(),
   mainCategory: z.string().min(1, "Main category is required"),
   category: z.string().min(1, "Category is required"),
   images: z.string().min(1, "At least one image URL is required"),
@@ -92,6 +94,25 @@ const productFormSchema = z.object({
   sku: z.string().optional(),
   supplier: z.string().optional(),
   costPrice: z.string().optional(),
+  shippingChargeApplicable: z.boolean().default(false),
+  shippingCharge: z.string().optional(),
+});
+
+// Dynamic schema with conditional size validation
+const productFormSchema = baseProductFormSchema.extend({
+  size: z.string().optional(),
+  colors: z.string().optional(),
+}).superRefine((data, ctx) => {
+  // Check if size is required for this category
+  if (isSizeRequired(data.category)) {
+    if (!data.size || data.size.trim() === '') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Size is required for this product category",
+        path: ["size"],
+      });
+    }
+  }
 });
 
 type ProductFormValues = z.infer<typeof productFormSchema>;
@@ -267,6 +288,8 @@ function AdminProductsContent() {
         reorderPoint: data.reorderPoint ? parseInt(data.reorderPoint) : 10,
         maxStock: data.maxStock ? parseInt(data.maxStock) : 100,
         costPrice: data.costPrice || null,
+        shippingChargeApplicable: data.shippingChargeApplicable,
+        shippingCharge: data.shippingCharge || "0",
       };
       console.log('📦 CREATE PRODUCT - Form data:', data);
       console.log('📦 CREATE PRODUCT - Sending to backend:', productData);
@@ -305,6 +328,8 @@ function AdminProductsContent() {
         reorderPoint: data.reorderPoint ? parseInt(data.reorderPoint) : 10,
         maxStock: data.maxStock ? parseInt(data.maxStock) : 100,
         costPrice: data.costPrice || null,
+        shippingChargeApplicable: data.shippingChargeApplicable,
+        shippingCharge: data.shippingCharge || "0",
       };
       console.log('📝 UPDATE PRODUCT - Form data:', data);
       console.log('📝 UPDATE PRODUCT - Sending to backend:', productData);
@@ -356,6 +381,8 @@ function AdminProductsContent() {
       unit: "per unit",
       mainCategory: "Kits",
       category: "",
+      size: "",
+      colors: "",
       images: "",
       specifications: "",
       planterCount: "",
@@ -395,6 +422,7 @@ function AdminProductsContent() {
       price: product.price.toString(),
       unit: product.unit || "per unit",
       size: (product as any).size || "",
+      colors: product.colors || "",
       mainCategory: product.mainCategory || "Kits",
       category: product.category,
       images: product.images?.join('\n') || '',
@@ -410,6 +438,8 @@ function AdminProductsContent() {
       sku: product.sku || "",
       supplier: product.supplier || "",
       costPrice: product.costPrice?.toString() || "",
+      shippingChargeApplicable: Boolean(product.shippingChargeApplicable),
+      shippingCharge: product.shippingCharge?.toString() || "0",
     });
     setIsEditDialogOpen(true);
   };
@@ -626,16 +656,49 @@ function AdminProductsContent() {
                   <FormField
                     control={createForm.control}
                     name="size"
+                    render={({ field }) => {
+                      const selectedCategory = createForm.watch('category');
+                      const sizeRequired = isSizeRequired(selectedCategory || '');
+                      return (
+                        <FormItem>
+                          <FormLabel>
+                            Size {sizeRequired ? <span className="text-destructive">*</span> : '(Optional)'}
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              placeholder="e.g., S, M, L, XL or 32, 34, 36"
+                              data-testid="input-product-size"
+                              className={sizeRequired && !field.value ? 'border-destructive' : ''}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      );
+                    }}
+                  />
+                  <FormField
+                    control={createForm.control}
+                    name="colors"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Size (Optional)</FormLabel>
+                        <FormLabel>Colors (Optional)</FormLabel>
                         <FormControl>
-                          <Input {...field} placeholder="e.g., S, M, L, XL or 32, 34, 36" data-testid="input-product-size" />
+                          <Input {...field} placeholder="e.g., Black, Blue, Red" data-testid="input-product-colors" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
+                  <FormField control={createForm.control} name="shippingChargeApplicable" render={({ field }) => (
+                    <FormItem className="flex items-center gap-2 rounded border p-3">
+                      <FormControl><input type="checkbox" checked={!!field.value} onChange={e => field.onChange(e.target.checked)} /></FormControl>
+                      <FormLabel className="!mt-0">Apply product shipping charge</FormLabel>
+                    </FormItem>
+                  )} />
+                  <FormField control={createForm.control} name="shippingCharge" render={({ field }) => (
+                    <FormItem><FormLabel>Product Shipping Charge (per item)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} /></FormControl><FormMessage /></FormItem>
+                  )} />
                   <FormField
                     control={createForm.control}
                     name="inStock"
@@ -1032,16 +1095,48 @@ function AdminProductsContent() {
                 <FormField
                   control={editForm.control}
                   name="size"
+                  render={({ field }) => {
+                    const selectedCategory = editForm.watch('category');
+                    const sizeRequired = isSizeRequired(selectedCategory || '');
+                    return (
+                      <FormItem>
+                        <FormLabel>
+                          Size {sizeRequired ? <span className="text-destructive">*</span> : '(Optional)'}
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            placeholder="e.g., S, M, L, XL or 32, 34, 36"
+                            className={sizeRequired && !field.value ? 'border-destructive' : ''}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    );
+                  }}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="colors"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Size (Optional)</FormLabel>
+                      <FormLabel>Colors (Optional)</FormLabel>
                       <FormControl>
-                        <Input {...field} placeholder="e.g., S, M, L, XL or 32, 34, 36" />
+                        <Input {...field} placeholder="e.g., Black, Blue, Red" data-testid="input-edit-product-colors" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+                <FormField control={editForm.control} name="shippingChargeApplicable" render={({ field }) => (
+                  <FormItem className="flex items-center gap-2 rounded border p-3">
+                    <FormControl><input type="checkbox" checked={!!field.value} onChange={e => field.onChange(e.target.checked)} /></FormControl>
+                    <FormLabel className="!mt-0">Apply product shipping charge</FormLabel>
+                  </FormItem>
+                )} />
+                <FormField control={editForm.control} name="shippingCharge" render={({ field }) => (
+                  <FormItem><FormLabel>Product Shipping Charge (per item)</FormLabel><FormControl><Input type="number" min="0" step="0.01" {...field} /></FormControl><FormMessage /></FormItem>
+                )} />
                 <FormField
                   control={editForm.control}
                   name="inStock"
@@ -1146,6 +1241,18 @@ function AdminProductsContent() {
                   );
                 }}
               />
+
+              {/* Product Variants Management */}
+              {editingProduct && (
+                <div className="border-t pt-6 mt-6">
+                  <ProductVariantsManager
+                    productId={editingProduct.id}
+                    productName={editingProduct.name}
+                    basePrice={editingProduct.price.toString()}
+                  />
+                </div>
+              )}
+
               <DialogFooter>
                 <Button 
                   type="submit" 
