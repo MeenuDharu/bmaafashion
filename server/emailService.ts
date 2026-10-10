@@ -22,7 +22,7 @@ if (!process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
 
 // Create SMTP transporter with Outlook/Office365 configuration
 const transporter = nodemailer.createTransport({
-  host: "smtp.office365.com",
+  host: "smtp.gmail.com",
   port: 587,
   secure: false, // true for 465, false for other ports
   auth: {
@@ -40,7 +40,7 @@ const transporter = nodemailer.createTransport({
 // Verify SMTP connection on startup
 if (process.env.SMTP_EMAIL && process.env.SMTP_PASSWORD) {
   console.log("📧 EMAIL CONFIGURATION:");
-  console.log(`   SMTP Host: smtp.office365.com:587`);
+  console.log(`   SMTP Host: smtp.gmail.com:587`);
   console.log(`   SMTP Email: ${process.env.SMTP_EMAIL}`);
   console.log(`   SMTP Password: ${process.env.SMTP_PASSWORD ? '***configured***' : 'NOT SET'}`);
   console.log(`   FROM Address will be: ${process.env.SMTP_EMAIL}`);
