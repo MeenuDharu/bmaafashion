@@ -72,6 +72,23 @@ export default function ProductVariantsManager({
     retry: false,
   });
 
+  // Clothing sizes are sorted in a human-friendly order (unknown/custom sizes last).
+  const sizeOrder = ["XXS", "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL"];
+  const sortedVariants = [...variants].sort((a, b) => {
+    const colorCompare = (a.color || "").localeCompare(b.color || "", undefined, { sensitivity: "base" });
+    if (colorCompare !== 0) return colorCompare;
+    const aSize = (a.size || "").trim().toUpperCase();
+    const bSize = (b.size || "").trim().toUpperCase();
+    const aIndex = sizeOrder.indexOf(aSize);
+    const bIndex = sizeOrder.indexOf(bSize);
+    if (aIndex !== -1 || bIndex !== -1) {
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    }
+    return aSize.localeCompare(bSize, undefined, { numeric: true, sensitivity: "base" });
+  });
+
   // Create variant mutation
   const createVariantMutation = useMutation({
     mutationFn: async (data: VariantFormData) => {
@@ -124,8 +141,10 @@ export default function ProductVariantsManager({
         {
           method: "PUT",
           body: JSON.stringify({
+            color: data.color,
+            size: data.size,
             price: data.price,
-            stockQuantity: data.stockQuantity ? parseInt(data.stockQuantity) : undefined,
+            stockQuantity: data.stockQuantity !== undefined ? parseInt(data.stockQuantity) : undefined,
             sku: data.sku,
           }),
         }
@@ -218,6 +237,23 @@ export default function ProductVariantsManager({
     });
   };
 
+  const handleSaveVariant = () => {
+    if (!editingVariant) return;
+    if (!formData.color.trim() && !formData.size.trim()) {
+      toast({ title: "Validation Error", description: "Provide a color or size.", variant: "destructive" });
+      return;
+    }
+    if (!formData.price || !Number.isFinite(Number(formData.price)) || Number(formData.price) <= 0) {
+      toast({ title: "Validation Error", description: "Enter a valid price.", variant: "destructive" });
+      return;
+    }
+    if (!Number.isInteger(Number(formData.stockQuantity)) || Number(formData.stockQuantity) < 0) {
+      toast({ title: "Validation Error", description: "Stock must be a non-negative whole number.", variant: "destructive" });
+      return;
+    }
+    updateVariantMutation.mutate({ variantId: editingVariant.id, data: formData });
+  };
+
   const handleDelete = (variantId: string) => {
     if (confirm("Are you sure you want to delete this variant?")) {
       deleteVariantMutation.mutate(variantId);
@@ -299,7 +335,7 @@ export default function ProductVariantsManager({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {variants.map((variant) => (
+                {sortedVariants.map((variant) => (
                   <TableRow key={variant.id}>
                     <TableCell>
                       {variant.color ? (
@@ -320,55 +356,13 @@ export default function ProductVariantsManager({
                     </TableCell>
                     <TableCell>₹{parseFloat(variant.price || "0").toLocaleString()}</TableCell>
                     <TableCell>
-                      {editingVariant?.id === variant.id ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="number"
-                            min="0"
-                            defaultValue={variant.stockQuantity}
-                            className="w-20"
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                handleUpdateStock(
-                                  variant,
-                                  (e.target as HTMLInputElement).value
-                                );
-                              }
-                            }}
-                            id={`stock-${variant.id}`}
-                          />
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              const input = document.getElementById(
-                                `stock-${variant.id}`
-                              ) as HTMLInputElement;
-                              handleUpdateStock(variant, input.value);
-                            }}
-                          >
-                            <Save className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setEditingVariant(null)}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold">{variant.stockQuantity}</span>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setEditingVariant(variant)}
-                          >
-                            <Edit2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">{variant.stockQuantity}</span>
+                        <Button size="sm" variant="ghost" type="button" aria-label={`Edit ${variant.size || variant.color || "variant"}`} onClick={() => {
+                          setEditingVariant(variant);
+                          setFormData({ color: variant.color || "", size: variant.size || "", price: String(variant.price || basePrice), stockQuantity: String(variant.stockQuantity ?? 0), sku: variant.sku || "" });
+                        }}><Edit2 className="h-3 w-3" /></Button>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -519,6 +513,27 @@ export default function ProductVariantsManager({
             >
               {createVariantMutation.isPending ? "Creating..." : "Create Variant"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Full variant edit dialog */}
+      <Dialog open={Boolean(editingVariant)} onOpenChange={(open) => { if (!open && !updateVariantMutation.isPending) setEditingVariant(null); }}>
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-lg max-h-[90dvh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Product Variant</DialogTitle>
+            <DialogDescription>Update color, size, SKU, price, and available stock for {productName}.</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2"><Label htmlFor="edit-variant-color">Color</Label><Input id="edit-variant-color" value={formData.color} onChange={(e) => setFormData({ ...formData, color: e.target.value })} /></div>
+            <div className="space-y-2"><Label htmlFor="edit-variant-size">Size</Label><Input id="edit-variant-size" value={formData.size} placeholder="S, M, L, XL, 2XL" onChange={(e) => setFormData({ ...formData, size: e.target.value })} /></div>
+            <div className="space-y-2"><Label htmlFor="edit-variant-price">Price (₹)</Label><Input id="edit-variant-price" type="number" min="0.01" step="0.01" value={formData.price} onChange={(e) => setFormData({ ...formData, price: e.target.value })} /></div>
+            <div className="space-y-2"><Label htmlFor="edit-variant-stock">Stock quantity</Label><Input id="edit-variant-stock" type="number" min="0" step="1" value={formData.stockQuantity} onChange={(e) => setFormData({ ...formData, stockQuantity: e.target.value })} /></div>
+            <div className="space-y-2 sm:col-span-2"><Label htmlFor="edit-variant-sku">SKU</Label><Input id="edit-variant-sku" value={formData.sku} onChange={(e) => setFormData({ ...formData, sku: e.target.value })} /></div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditingVariant(null)} disabled={updateVariantMutation.isPending}>Cancel</Button>
+            <Button type="button" onClick={handleSaveVariant} disabled={updateVariantMutation.isPending}>{updateVariantMutation.isPending ? "Saving..." : "Save Variant"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

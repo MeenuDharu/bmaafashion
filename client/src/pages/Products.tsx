@@ -668,7 +668,7 @@ export default function Products({ onAddToCart, onViewProductDetails }: Products
                           <img
                             src={featuredProduct.images?.[0] ? `/api/images/${featuredProduct.images[0]}` : '/placeholder-image.jpg'}
                             alt={featuredProduct.name}
-                            className="w-full h-48 object-cover hover:scale-105 transition-transform duration-500"
+                            className="w-full aspect-[3/4] object-contain bg-muted transition-transform duration-500"
                           />
                           <div className="p-4 space-y-3 bg-gradient-to-b from-white to-muted/20">
                             <h4 className="font-semibold text-sm line-clamp-2 text-foreground">{featuredProduct.name}</h4>

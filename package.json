@@ -17,7 +17,6 @@
     "db:seed-fashion": "tsx scripts/seedFashionProducts.ts",
     "db:seed-product-variants": "tsx scripts/seedProductVariants.ts",
     "seed:variants": "tsx scripts/seedProductsWithVariants.ts",
-    "db:seed-bmaa-fashion-catalog": "tsx scripts/seedBmaaFashionCatalog.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:backup": "tsx scripts/backup.ts",

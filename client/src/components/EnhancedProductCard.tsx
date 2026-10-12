@@ -77,7 +77,7 @@ export default function EnhancedProductCard({
         <img 
           src={currentImage} 
           alt={product.name}
-          className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
+          className="w-full h-full object-contain transition-transform duration-700 ease-out"
           loading="lazy"
           decoding="async"
           data-testid={`img-product-${product.id}`}
