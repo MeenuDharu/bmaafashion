@@ -151,17 +151,22 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
     structuredData: productStructuredData || undefined,
   });
 
-  // Get available sizes from product or use defaults
+  // Prefer sizes stored on actual product variants. Some live products use
+  // category names that are not in SIZE_REQUIRED_CATEGORIES, so don't hide
+  // valid variant sizes just because the category label differs.
   const availableSizes = useMemo(() => {
     if (!product) return [];
-    
-    // Check if this product category requires size
-    const requiresSize = isSizeRequired(product.category);
-    if (!requiresSize) return [];
-    
-    // Parse sizes from product.size field
-    const variantSizes = Array.from(new Set(variants.filter(v => v.size && v.isActive !== false).map(v => v.size!)));
+
+    const variantSizes = Array.from(new Set(
+      variants
+        .filter(v => v.size && v.isActive !== false)
+        .map(v => v.size!)
+    ));
     if (variantSizes.length > 0) return variantSizes;
+
+    // Preserve the existing product-size/default fallback for categories
+    // that require size selection.
+    if (!isSizeRequired(product.category)) return [];
     const productSizes = parseSizes(product.size);
     return productSizes.length > 0 ? productSizes : getDefaultSizes();
   }, [product, variants]);
@@ -320,6 +325,12 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
   }
 
   const isInStock = (selectedVariant?.stockQuantity ?? product.inStock) > 0;
+  // Variant stock can be available even when the aggregate product stock field
+  // is stale/zero. Keep the size selector visible so the shopper can select
+  // the variant whose stock is authoritative.
+  const hasAvailableVariantStock = variants.some(
+    variant => variant.isActive !== false && Number(variant.stockQuantity ?? 0) > 0
+  );
   const stockInfo = getStockStatus();
   const selectedOriginalPrice = Number(selectedVariant?.price ?? product.price);
 
@@ -473,7 +484,7 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
             {/* Quantity and Add to Cart */}
             <div className="space-y-4">
               {/* Size Selector - Only show if product has sizes available */}
-              {isInStock && availableSizes.length > 0 && (
+              {availableSizes.length > 0 && (isInStock || hasAvailableVariantStock) && (
                 <div className="space-y-2">
                   <label htmlFor="size" className="font-medium">
                     Size {sizeRequired && <span className="text-destructive">*</span>}
