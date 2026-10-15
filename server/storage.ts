@@ -173,7 +173,7 @@ import {
 } from "@shared/schema";
 import { coupons, couponUsages, giftCards, giftCardTransactions, loyaltyAccounts, loyaltyTransactions, shippingRules } from "@shared/commerceFeatures";
 import { db } from "./db";
-import { eq, like, ilike, desc, asc, and, or, sql, lte, gte, inArray } from "drizzle-orm";
+import { eq, like, ilike, desc, asc, and, or, sql, lte, gte, inArray, ne } from "drizzle-orm";
 import { hashToken } from "./jwtAuth";
 import crypto from "crypto";
 
@@ -875,8 +875,19 @@ const normalizeOrderSettings = (value: unknown): OrderSettings | null => {
   if (!record) return null;
   return {
     codEnabled: typeof record.codEnabled === "boolean" ? record.codEnabled : undefined,
+    onlinePaymentEnabled: typeof record.onlinePaymentEnabled === "boolean" ? record.onlinePaymentEnabled : undefined,
+    minimumOrderAmount: typeof record.minimumOrderAmount === "number" ? record.minimumOrderAmount : undefined,
     autoCancelHours: typeof record.autoCancelHours === "number" ? record.autoCancelHours : undefined,
     deliveryMessage: typeof record.deliveryMessage === "string" ? record.deliveryMessage : undefined,
+    firstLoginPromoCode: typeof record.firstLoginPromoCode === "string" ? record.firstLoginPromoCode : undefined,
+    firstLoginPromoMode: record.firstLoginPromoMode === "automatic" || record.firstLoginPromoMode === "manual" ? record.firstLoginPromoMode : undefined,
+    firstLoginPromoPercent: typeof record.firstLoginPromoPercent === "number" ? record.firstLoginPromoPercent : undefined,
+    globalDiscountPercent: typeof record.globalDiscountPercent === "number" ? record.globalDiscountPercent : undefined,
+    globalDiscountMode: record.globalDiscountMode === "automatic" || record.globalDiscountMode === "manual" ? record.globalDiscountMode : undefined,
+    globalDiscountCode: typeof record.globalDiscountCode === "string" ? record.globalDiscountCode : undefined,
+    couponApplicationModes: record.couponApplicationModes && typeof record.couponApplicationModes === "object" && !Array.isArray(record.couponApplicationModes)
+      ? Object.fromEntries(Object.entries(record.couponApplicationModes as Record<string, unknown>).filter((entry): entry is [string, "automatic" | "manual"] => entry[1] === "automatic" || entry[1] === "manual"))
+      : undefined,
   };
 };
 
@@ -1826,19 +1837,16 @@ export class DatabaseStorage implements IStorage {
     const state = (parts[1] || parts[0] || "").replace(/\b\d{5,6}\b/g, "").trim().toLowerCase();
     const country = (lines[3] || "India").trim().toLowerCase();
     const rules = await tx.select().from(shippingRules).where(eq(shippingRules.active, true)).orderBy(asc(shippingRules.priority));
-    const rule = rules.find((r: any) => (!r.country || r.country.trim().toLowerCase() === country) && (!r.state || r.state.trim().toLowerCase() === state));
-    const baseCharge = rule ? Math.max(0, Number(rule.shippingCharge || 0)) : Math.max(0, Number(policy.shippingCost || 0));
+    const rule = rules
+      .filter((r: any) => (!r.country || r.country.trim().toLowerCase() === country) && (!r.state || r.state.trim().toLowerCase() === state))
+      // State-specific shipping must override the country-wide default. Priority breaks ties.
+      .sort((a: any, b: any) => Number(Boolean(b.state?.trim())) - Number(Boolean(a.state?.trim())) || Number(a.priority || 0) - Number(b.priority || 0))[0];
+    const chargePerGroup = rule ? Math.max(0, Number(rule.shippingCharge || 0)) : Math.max(0, Number(policy.shippingCost ?? 60));
     const freeThreshold = rule?.freeShippingThreshold != null ? Math.max(0, Number(rule.freeShippingThreshold)) : Math.max(0, Number(policy.freeThreshold || 0));
-    const normalShipping = freeThreshold > 0 && subtotal >= freeThreshold ? 0 : baseCharge;
-    const productIds = items.map((item: any) => String(item.productId)).filter(Boolean);
-    const shippingProducts = productIds.length ? await tx.select({ id: products.id, shippingChargeApplicable: products.shippingChargeApplicable, shippingCharge: products.shippingCharge }).from(products).where(inArray(products.id, productIds)) : [];
-    const productMap = new Map<string, { id: string; shippingChargeApplicable: boolean; shippingCharge: string | null }>(shippingProducts.map((p: { id: string; shippingChargeApplicable: boolean; shippingCharge: string | null }) => [p.id, p] as [string, { id: string; shippingChargeApplicable: boolean; shippingCharge: string | null }]));
-    const productShipping = items.reduce((sum: number, item: any) => {
-      const product = productMap.get(String(item.productId));
-      if (!product?.shippingChargeApplicable) return sum;
-      return sum + Math.max(0, Number(product.shippingCharge || 0)) * Math.max(0, Number(item.quantity || 0));
-    }, 0);
-    return Number((normalShipping + productShipping).toFixed(2));
+    const totalQuantity = items.reduce((sum: number, item: any) => sum + Math.max(0, Math.floor(Number(item.quantity || 0))), 0);
+    const normalShipping = freeThreshold > 0 && subtotal >= freeThreshold ? 0 : (totalQuantity > 0 ? Math.ceil(totalQuantity / 2) * chargePerGroup : 0);
+    // Shipping follows the destination rule and total item quantity. Product-level shipping is not added again.
+    return Number(normalShipping.toFixed(2));
   }
 
   async createSecureOrder(orderData: any, items: any[], userId: string | null = null): Promise<Order> {
@@ -1933,8 +1941,14 @@ export class DatabaseStorage implements IStorage {
           if (coupon.endsAt && coupon.endsAt < now) throw new Error('This coupon has expired');
           if (coupon.usageLimit != null && coupon.usageCount >= coupon.usageLimit) throw new Error('This coupon usage limit has been reached');
           if (Number(coupon.minimumOrderAmount || 0) > subtotal) throw new Error(`Minimum order amount for this coupon is ₹${Number(coupon.minimumOrderAmount).toFixed(2)}`);
-          if (coupon.firstOrderOnly && userId) {
-            const previousOrders = await tx.select({ id: orders.id }).from(orders).where(eq(orders.userId, userId)).limit(1);
+          if (coupon.firstOrderOnly) {
+            const customerEmail = String(orderData.customerEmail || "").trim().toLowerCase();
+            const priorOrderConditions = [];
+            if (userId) priorOrderConditions.push(eq(orders.userId, userId));
+            if (customerEmail) priorOrderConditions.push(ilike(orders.customerEmail, customerEmail));
+            const previousOrders = priorOrderConditions.length
+              ? await tx.select({ id: orders.id }).from(orders).where(and(or(...priorOrderConditions), ne(orders.status, "cancelled"))).limit(1)
+              : [];
             if (previousOrders.length) throw new Error('This coupon is valid only on the first order');
           }
           if (coupon.perCustomerLimit != null && userId) {
@@ -1960,6 +1974,15 @@ export class DatabaseStorage implements IStorage {
           }
           discountAmount = discountType === 'fixed' ? Math.min(value, subtotal) : Math.min(subtotal, subtotal * Math.min(value, 100) / 100);
           appliedPromoCode = promotion.code?.trim().toUpperCase() ?? null;
+        }
+      }
+
+      if (!promoCode) {
+        const orderSettings = siteConfig?.orderSettings || {};
+        const globalMode = orderSettings.globalDiscountMode || "automatic";
+        const globalPercent = Math.min(100, Math.max(0, Number(orderSettings.globalDiscountPercent ?? 30)));
+        if (globalMode === "automatic" && globalPercent > 0) {
+          discountAmount = Math.min(subtotal, subtotal * globalPercent / 100);
         }
       }
 
@@ -1989,6 +2012,13 @@ export class DatabaseStorage implements IStorage {
       if (paymentMethod === 'cod' && siteConfig?.orderSettings?.codEnabled !== true) {
         throw new Error('Cash on Delivery is currently unavailable');
       }
+      if (paymentMethod !== 'cod' && siteConfig?.orderSettings?.onlinePaymentEnabled === false) {
+        throw new Error('Online payment is currently unavailable. Please choose another payment method or contact the store.');
+      }
+      const minimumOrderAmount = Math.max(0, Number(siteConfig?.orderSettings?.minimumOrderAmount ?? 0));
+      if (subtotal < minimumOrderAmount) {
+        throw new Error(`The minimum order amount is ₹${minimumOrderAmount.toFixed(2)}`);
+      }
       
       // Create order with server-calculated totals
       const secureOrderData: InsertOrder = {
@@ -2008,7 +2038,7 @@ export class DatabaseStorage implements IStorage {
         giftCardDiscount: giftCardDiscountAmount.toFixed(2),
         loyaltyPointsRedeemed,
         invoiceNumber: `BMAA-${new Date().getFullYear()}-${cryptoRandomOrderNumber()}`,
-        notes: [orderData.notes, appliedPromoCode ? `Promotion: ${appliedPromoCode} (discount ₹${discountAmount.toFixed(2)})` : null].filter(Boolean).join('\n') || null
+        notes: [orderData.notes, appliedPromoCode ? `Promotion: ${appliedPromoCode} (discount ₹${discountAmount.toFixed(2)})` : (!promoCode && Number(siteConfig?.orderSettings?.globalDiscountPercent ?? 30) > 0 && (siteConfig?.orderSettings?.globalDiscountMode || 'automatic') === 'automatic' ? `Automatic storewide discount (${Number(siteConfig?.orderSettings?.globalDiscountPercent ?? 30)}%; ₹${discountAmount.toFixed(2)})` : null)].filter(Boolean).join('\n') || null
       };
       
       const [newOrder] = await tx.insert(orders).values(secureOrderData).returning();
@@ -3998,10 +4028,11 @@ export class DatabaseStorage implements IStorage {
     const hashedToken = hashToken(token);
     const result = await db
       .update(users)
-      .set({ 
+      .set({
+        // Keep the hashed token until its original expiry so repeated requests
+        // (e.g. email-security scanners or browser retries) can return an
+        // idempotent "already verified" result without verifying another user.
         emailVerified: true,
-        emailVerificationToken: null, // Clear the token
-        emailVerificationTokenExpiry: null, // Clear the expiry
         updatedAt: new Date()
       })
       .where(
@@ -4018,8 +4049,10 @@ export class DatabaseStorage implements IStorage {
   async verifyUserEmail(userId: string): Promise<User | undefined> {
     const [updatedUser] = await db
       .update(users)
-      .set({ 
+      .set({
         emailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationTokenExpiry: null,
         updatedAt: new Date()
       })
       .where(eq(users.id, userId))
@@ -4043,6 +4076,16 @@ export class DatabaseStorage implements IStorage {
     await db
       .delete(emailVerificationTokens)
       .where(sql`${emailVerificationTokens.expiresAt} <= NOW()`);
+
+    // Remove expired hashed tokens from the user table as well.
+    await db
+      .update(users)
+      .set({
+        emailVerificationToken: null,
+        emailVerificationTokenExpiry: null,
+        updatedAt: new Date()
+      })
+      .where(sql`${users.emailVerificationTokenExpiry} <= NOW()`);
   }
 
   // Notification operations

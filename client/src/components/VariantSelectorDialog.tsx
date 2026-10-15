@@ -1,3 +1,4 @@
+import StorePriceDisplay from "@/components/StorePriceDisplay";
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -220,9 +221,7 @@ export function VariantSelectorDialog({ product, open, onOpenChange }: VariantSe
             />
             <div className="flex-1 min-w-0">
               <h4 className="font-medium text-sm line-clamp-2">{product.name}</h4>
-              <p className="text-lg font-bold text-primary">
-                ₹{Number(product.price).toLocaleString('en-IN')}
-              </p>
+              <StorePriceDisplay price={selectedVariant?.price ?? product.price} className="text-lg font-bold text-primary" originalClassName="text-xs text-muted-foreground line-through" discountClassName="text-xs font-semibold text-green-600" />
             </div>
           </div>
 

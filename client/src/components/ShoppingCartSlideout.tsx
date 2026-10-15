@@ -1,9 +1,12 @@
+import StorePriceDisplay from "@/components/StorePriceDisplay";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
 import { CartItem, Product, ProductVariant } from "@shared/schema";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { useEffect, useState } from "react";
+import { readActiveCouponDisplay, subscribeActiveCouponDisplay, type ActiveCouponDisplay } from "@/lib/activeCouponDisplay";
 
 // Enhanced cart item with product details for UI
 interface CartItemWithProduct extends CartItem {
@@ -28,15 +31,23 @@ export default function ShoppingCartSlideout({
   onRemoveItem,
   onCheckout
 }: ShoppingCartSlideoutProps) {
-  const { policies } = useSiteSettings();
-  const subtotal = items.reduce((sum, item) => sum + (Number(item.variant?.price ?? item.product.price) * item.quantity), 0);
+  const { policies, orderSettings } = useSiteSettings();
+  const [activeCoupon, setActiveCoupon] = useState<ActiveCouponDisplay | null>(() => readActiveCouponDisplay());
+  useEffect(() => subscribeActiveCouponDisplay(() => setActiveCoupon(readActiveCouponDisplay())), []);
+  const originalSubtotal = items.reduce((sum, item) => sum + (Number(item.variant?.price ?? item.product.price) * item.quantity), 0);
+  const globalDiscountPercent = Math.min(100, Math.max(0, Number(orderSettings?.globalDiscountPercent ?? 30)));
+  const automaticGlobalDiscount = activeCoupon
+    ? Math.min(originalSubtotal, Math.max(0, Number(activeCoupon.discountAmount || 0)))
+    : (orderSettings?.globalDiscountMode ?? "automatic") === "automatic" ? originalSubtotal * globalDiscountPercent / 100 : 0;
+  const activeDiscountLabel = activeCoupon ? `Discount (${activeCoupon.code})` : `Automatic discount (${globalDiscountPercent}% off)`;
+  const discountedSubtotal = Math.max(0, originalSubtotal - automaticGlobalDiscount);
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   const freeThreshold = Math.max(0, Number(policies?.shipping?.freeThreshold ?? 0));
   const configuredShipping = Math.max(0, Number(policies?.shipping?.shippingCost ?? 0));
-  const shipping = freeThreshold > 0 && subtotal >= freeThreshold ? 0 : configuredShipping;
+  const shipping = freeThreshold > 0 && discountedSubtotal >= freeThreshold ? 0 : configuredShipping;
   const taxRate = Math.max(0, Number(policies?.gst?.rate ?? 0));
-  const tax = subtotal * taxRate / 100;
-  const total = subtotal + shipping + tax;
+  const tax = discountedSubtotal * taxRate / 100;
+  const total = discountedSubtotal + shipping + tax;
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
@@ -90,9 +101,9 @@ export default function ShoppingCartSlideout({
                         </div>
                       )}
                       <div className="flex items-baseline gap-1 mt-1">
-                        <p className="text-sm font-semibold text-primary">
-                          ₹{Number(item.variant?.price ?? item.product.price).toLocaleString('en-IN')}
-                        </p>
+                        <div className="text-sm font-semibold text-primary">
+                          <StorePriceDisplay price={item.variant?.price ?? item.product.price} className="text-sm font-semibold text-primary" originalClassName="text-xs text-muted-foreground line-through" discountClassName="text-xs font-semibold text-green-600" />
+                        </div>
                         <span className="text-xs text-muted-foreground">
                           {item.product.unit || 'per unit'}
                         </span>
@@ -148,8 +159,10 @@ export default function ShoppingCartSlideout({
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span data-testid="text-subtotal">₹{subtotal.toLocaleString('en-IN')}</span>
+                  <span data-testid="text-subtotal">₹{originalSubtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                 </div>
+                {automaticGlobalDiscount > 0 && <div className="flex justify-between text-sm text-green-600"><span>{activeDiscountLabel}</span><span>-₹{automaticGlobalDiscount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>}
+                {automaticGlobalDiscount > 0 && <div className="flex justify-between text-sm"><span>Offer subtotal</span><span>₹{discountedSubtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>}
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Shipping</span>
                   <span className={shipping === 0 ? "text-amber-600" : ""} data-testid="text-shipping">{shipping === 0 ? "Free" : `₹${shipping.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}</span>

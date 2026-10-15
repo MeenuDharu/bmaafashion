@@ -380,18 +380,39 @@ export function setupAuthRoutes(app: Express) {
       // Validate the token
       const verificationToken = await storage.validateEmailVerificationToken(token);
       if (!verificationToken) {
+        // Verification links can be requested more than once by email scanners,
+        // browser retries, or React development checks. If this same token was
+        // already consumed and has not expired, treat the request as success.
+        const existingToken = await storage.getEmailVerificationToken(token);
+        if (existingToken?.used && existingToken.expiresAt && new Date(existingToken.expiresAt) > new Date()) {
+          return res.json({
+            message: 'This email address has already been verified. You can log in.',
+            success: true,
+            verified: true,
+            alreadyVerified: true
+          });
+        }
         return res.status(400).json({
           error: 'INVALID_TOKEN',
-          message: 'Invalid or expired verification token'
+          message: 'This verification link is invalid or has expired. Please request a new verification email.'
         });
       }
 
-      // Consume the token (marks email as verified and clears token)
+      // Consume the token. Handle a concurrent duplicate request as success.
       const success = await storage.consumeEmailVerificationToken(token);
       if (!success) {
+        const existingToken = await storage.getEmailVerificationToken(token);
+        if (existingToken?.used && existingToken.expiresAt && new Date(existingToken.expiresAt) > new Date()) {
+          return res.json({
+            message: 'This email address has already been verified. You can log in.',
+            success: true,
+            verified: true,
+            alreadyVerified: true
+          });
+        }
         return res.status(400).json({
           error: 'VERIFICATION_FAILED',
-          message: 'Failed to verify email address'
+          message: 'Unable to verify this email address. The link may have expired; please request a new one.'
         });
       }
 

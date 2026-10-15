@@ -1,22 +1,20 @@
-# Action-level loading indicators
+# BMAA Fashion global loading indicators
 
-The shared `client/src/components/ui/button.tsx` Button now supports:
+This update adds loading feedback without changing commerce, coupon, shipping, stock, or order calculations.
 
-- `loading={boolean}` for mutation/query state such as `mutation.isPending` / `mutation.isLoading`.
-- `loadingText="Saving…"` to replace the label while busy.
-- Automatic spinner + disabled state when an `onClick` callback returns a Promise.
-- `aria-busy` and an accessible spinner label.
+- A static boot loader appears immediately in `client/index.html`, avoiding a blank screen while React starts.
+- A slim progress bar appears for in-flight `/api/*` requests, including page data loads.
+- A centered `Please wait…` overlay appears for API mutations (`POST`, `PUT`, `PATCH`, `DELETE`) so save, create, update, remove, checkout, and other server-backed actions show progress.
+- The fetch wrapper passes the same input and init to the original browser `fetch`, returns its response unchanged, and uses `finally` only to clear loading state.
+- The loading indicator supports concurrent API requests and delays its appearance briefly to avoid flashing for fast requests.
+- Images and third-party font/script requests are not tracked by the API loader.
 
-Examples:
+Files changed:
+- `client/index.html`
+- `client/src/main.tsx`
+- `client/src/App.tsx`
+- `client/src/index.css`
+- `client/src/lib/globalLoading.ts` (new)
+- `client/src/components/GlobalLoadingIndicator.tsx` (new)
 
-```tsx
-<Button loading={createCoupon.isPending} loadingText="Creating…" onClick={() => createCoupon.mutate(payload)}>
-  Create Offer / Coupon
-</Button>
-
-<Button onClick={async () => { await saveSettings(); }} loadingText="Saving…">
-  Save Settings
-</Button>
-```
-
-Important: React Query's `mutate()` returns void. For mutation buttons, pass the mutation's pending state through `loading`. If a form uses `handleSubmit` and its callback is async, prefer `loading={form.formState.isSubmitting}`. A shared Button cannot infer the lifetime of a fire-and-forget request.
+Run `npm run check` and `npm run build` locally before deploying. The environment used to prepare this ZIP did not have project dependencies installed, so those commands could not be verified here.

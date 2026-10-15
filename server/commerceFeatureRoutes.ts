@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
-import { and, asc, desc, eq, ilike, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "./db";
-import { authenticateToken, requireAdmin, type AuthenticatedRequest } from "./jwtAuth";
+import { authenticateToken, optionalAuth, requireAdmin, type AuthenticatedRequest } from "./jwtAuth";
 import { products, productVariants, supportTickets, users, orders, siteSettings } from "@shared/schema";
 import {
   coupons, couponUsages, supportTicketMessages, returnRequests, recentlyViewedProducts, compareItems,
@@ -127,51 +127,228 @@ export function registerCommerceFeatureRoutes(app: Express) {
       const countryName = String(country || "India").trim();
       const stateName = String(state || "").trim();
       const itemList = Array.isArray(items) ? items : [];
-      const productIds = itemList.map((item: any) => String(item.productId || "")).filter(Boolean);
-      const productsForShipping = productIds.length ? await db.select({ id: products.id, shippingChargeApplicable: products.shippingChargeApplicable, shippingCharge: products.shippingCharge }).from(products).where(inArray(products.id, productIds)) : [];
-      const productMap = new Map(productsForShipping.map(p => [p.id, p]));
       const rules = await db.select().from(shippingRules).where(eq(shippingRules.active, true)).orderBy(asc(shippingRules.priority));
       const normalizedCountry = countryName.toLowerCase();
       const normalizedState = stateName.toLowerCase();
-      const matching = rules.find(rule => {
-        const countryMatches = !rule.country || rule.country.trim().toLowerCase() === normalizedCountry;
-        const stateMatches = !rule.state || rule.state.trim().toLowerCase() === normalizedState;
-        return countryMatches && stateMatches;
-      });
+      const matching = rules
+        .filter(rule => {
+          const countryMatches = !rule.country || rule.country.trim().toLowerCase() === normalizedCountry;
+          const stateMatches = !rule.state || rule.state.trim().toLowerCase() === normalizedState;
+          return countryMatches && stateMatches;
+        })
+        // A state-specific rule must win over a country-wide rule, regardless of priority.
+        .sort((a, b) => Number(Boolean(b.state?.trim())) - Number(Boolean(a.state?.trim())) || Number(a.priority || 0) - Number(b.priority || 0))[0];
       const siteConfig = (await db.select().from(siteSettings).where(eq(siteSettings.id, 1)).limit(1))[0];
       const policy = siteConfig?.policies?.shipping || {};
-      const baseCharge = matching ? Number(matching.shippingCharge || 0) : Math.max(0, Number(policy.shippingCost || 0));
+      const chargePerGroup = matching ? Number(matching.shippingCharge || 0) : Math.max(0, Number(policy.shippingCost || 60));
       const freeThreshold = matching?.freeShippingThreshold != null ? Number(matching.freeShippingThreshold) : Math.max(0, Number(policy.freeThreshold || 0));
       const merchandiseSubtotal = Math.max(0, Number(subtotal || 0));
-      const normalShipping = freeThreshold > 0 && merchandiseSubtotal >= freeThreshold ? 0 : baseCharge;
-      const productShipping = itemList.reduce((sum: number, item: any) => {
-        const product = productMap.get(String(item.productId));
-        if (!product?.shippingChargeApplicable) return sum;
-        return sum + Math.max(0, Number(product.shippingCharge || 0)) * Math.max(0, Number(item.quantity || 0));
-      }, 0);
-      const shipping = Number((normalShipping + productShipping).toFixed(2));
-      res.json({ shipping, baseShipping: Number(normalShipping.toFixed(2)), productShipping: Number(productShipping.toFixed(2)), freeShippingApplied: normalShipping === 0 && freeThreshold > 0 && merchandiseSubtotal >= freeThreshold, country: countryName, state: stateName, ruleId: matching?.id || null });
+      const totalQuantity = itemList.reduce((sum: number, item: any) => sum + Math.max(0, Math.floor(Number(item.quantity || 0))), 0);
+      const normalShipping = freeThreshold > 0 && merchandiseSubtotal >= freeThreshold ? 0 : (totalQuantity > 0 ? Math.ceil(totalQuantity / 2) * Math.max(0, chargePerGroup) : 0);
+      const productShipping = 0;
+      const shipping = Number(normalShipping.toFixed(2));
+      res.json({ shipping, baseShipping: shipping, productShipping: 0, totalQuantity, chargePerGroup, itemsPerGroup: 2, freeShippingApplied: normalShipping === 0 && freeThreshold > 0 && merchandiseSubtotal >= freeThreshold, country: countryName, state: stateName, ruleId: matching?.id || null });
     } catch (error) {
       console.error("Shipping quote failed:", error);
       res.status(400).json({ error: "Unable to calculate shipping" });
     }
   });
 
+  // Save the first-login offer and synchronize its coupon in one transaction.
+  // Existing coupon codes are updated in place; a replaced welcome coupon is disabled,
+  // never deleted, so historical coupon usage/order references remain intact.
+  app.put("/api/admin/welcome-offer", [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    try {
+      const input = z.object({
+        code: z.string().trim().min(1).max(64),
+        discountPercent: z.number().min(0).max(100),
+        mode: z.enum(["automatic", "manual"]),
+      }).parse(req.body);
+      const code = input.code.toUpperCase();
+      const saved = await db.transaction(async (tx) => {
+        const [settings] = await tx.select().from(siteSettings).where(eq(siteSettings.id, 1)).limit(1);
+        const currentOrderSettings = settings?.orderSettings || {};
+        const previousCode = String(currentOrderSettings.firstLoginPromoCode || "").trim().toUpperCase();
+        const globalCode = String(currentOrderSettings.globalDiscountCode || "").trim().toUpperCase();
+        if (globalCode && code === globalCode) throw new Error("Welcome coupon code must be different from the global storewide discount code");
+
+        if (previousCode && previousCode !== code) {
+          const [previousCoupon] = await tx.select().from(coupons).where(eq(coupons.code, previousCode)).limit(1);
+          // This code was the configured welcome coupon, so disable it when replacing
+          // it with the new code. Do not delete it; old orders/usages must remain auditable.
+          if (previousCoupon) {
+            await tx.update(coupons).set({ active: false, updatedAt: new Date() }).where(eq(coupons.id, previousCoupon.id));
+          }
+        }
+
+        const [existingCoupon] = await tx.select().from(coupons).where(eq(coupons.code, code)).limit(1);
+        const couponValues = {
+          code,
+          discountType: "percentage",
+          discountValue: input.discountPercent.toFixed(2),
+          minimumOrderAmount: "0",
+          maximumDiscountAmount: null,
+          usageLimit: null,
+          perCustomerLimit: 1,
+          firstOrderOnly: true,
+          repeatCustomerOnly: false,
+          applicableProductIds: [],
+          applicableCategories: [],
+          active: input.discountPercent > 0,
+          updatedAt: new Date(),
+        };
+        let coupon: typeof coupons.$inferSelect;
+        if (existingCoupon) {
+          [coupon] = await tx.update(coupons).set(couponValues).where(eq(coupons.id, existingCoupon.id)).returning();
+        } else {
+          [coupon] = await tx.insert(coupons).values({ ...couponValues, usageCount: 0, createdBy: authUser(req)?.id }).returning();
+        }
+
+        const orderSettings = {
+          ...currentOrderSettings,
+          firstLoginPromoCode: code,
+          firstLoginPromoMode: input.mode,
+          firstLoginPromoPercent: input.discountPercent,
+        };
+        await tx.insert(siteSettings).values({ id: 1, orderSettings }).onConflictDoUpdate({
+          target: siteSettings.id,
+          set: { orderSettings, updatedAt: new Date() },
+        });
+        return { coupon, orderSettings };
+      });
+      await audit(req, "update", "welcome_offer", saved.coupon.id, undefined, saved);
+      res.json({ success: true, ...saved });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: "Invalid welcome offer settings", details: error.errors });
+      console.error("Failed to save first-login welcome offer:", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to save welcome offer" });
+    }
+  });
+
+  // Storewide discount is separate from the welcome offer. In automatic mode it is
+  // applied server-side when no coupon is used; in manual mode the configured code
+  // is synchronized as a regular coupon. A welcome coupon always replaces this discount.
+  app.put("/api/admin/global-discount", [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    try {
+      const input = z.object({
+        discountPercent: z.number().min(0).max(100),
+        mode: z.enum(["automatic", "manual"]),
+        code: z.string().trim().min(1).max(64),
+      }).parse(req.body);
+      const code = input.code.toUpperCase();
+      const saved = await db.transaction(async (tx) => {
+        const [settings] = await tx.select().from(siteSettings).where(eq(siteSettings.id, 1)).limit(1);
+        const current = settings?.orderSettings || {};
+        const welcomeCode = String(current.firstLoginPromoCode || "").trim().toUpperCase();
+        if (code === welcomeCode) throw new Error("Storewide discount code must be different from the first-login welcome code");
+        const previousCode = String(current.globalDiscountCode || "").trim().toUpperCase();
+        if (previousCode && previousCode !== code) {
+          const [previous] = await tx.select().from(coupons).where(eq(coupons.code, previousCode)).limit(1);
+          if (previous && !previous.firstOrderOnly && !previous.repeatCustomerOnly) {
+            await tx.update(coupons).set({ active: false, updatedAt: new Date() }).where(eq(coupons.id, previous.id));
+          }
+        }
+        const [existing] = await tx.select().from(coupons).where(eq(coupons.code, code)).limit(1);
+        if (existing && (existing.firstOrderOnly || existing.repeatCustomerOnly) && code !== previousCode) {
+          throw new Error("That code is already reserved for a first-purchase or repeat-customer offer. Choose a different code.");
+        }
+        const couponValues = {
+          code,
+          discountType: "percentage",
+          discountValue: input.discountPercent.toFixed(2),
+          minimumOrderAmount: "0",
+          maximumDiscountAmount: null,
+          usageLimit: null,
+          perCustomerLimit: null,
+          firstOrderOnly: false,
+          repeatCustomerOnly: false,
+          applicableProductIds: [],
+          applicableCategories: [],
+          active: input.mode === "manual" && input.discountPercent > 0,
+          updatedAt: new Date(),
+        };
+        let coupon: typeof coupons.$inferSelect | undefined;
+        if (existing) {
+          [coupon] = await tx.update(coupons).set(couponValues).where(eq(coupons.id, existing.id)).returning();
+        } else {
+          [coupon] = await tx.insert(coupons).values({ ...couponValues, usageCount: 0, createdBy: authUser(req)?.id }).returning();
+        }
+        const orderSettings = { ...current, globalDiscountPercent: input.discountPercent, globalDiscountMode: input.mode, globalDiscountCode: code };
+        await tx.insert(siteSettings).values({ id: 1, orderSettings }).onConflictDoUpdate({ target: siteSettings.id, set: { orderSettings, updatedAt: new Date() } });
+        return { coupon, orderSettings };
+      });
+      await audit(req, "update", "global_discount", saved.coupon?.id, undefined, saved);
+      res.json({ success: true, ...saved });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: "Invalid storewide discount settings", details: error.errors });
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to save storewide discount" });
+    }
+  });
+
+  // Persist each regular coupon's automatic/manual application preference in site settings.
+  // Global and welcome coupons retain their dedicated settings above.
+  app.put("/api/admin/coupon-application-mode", [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    try {
+      const input = z.object({ code: z.string().trim().min(1).max(64), mode: z.enum(["automatic", "manual"]) }).parse(req.body);
+      const code = input.code.toUpperCase();
+      const [settings] = await db.select().from(siteSettings).where(eq(siteSettings.id, 1)).limit(1);
+      const current = settings?.orderSettings || {};
+      const globalCode = String(current.globalDiscountCode || "").trim().toUpperCase();
+      const welcomeCode = String(current.firstLoginPromoCode || "").trim().toUpperCase();
+      if (code === globalCode || code === welcomeCode) {
+        return res.status(400).json({ error: "Configure this code in its dedicated Global Discount or Welcome Offer settings" });
+      }
+      const [coupon] = await db.select({ id: coupons.id }).from(coupons).where(eq(coupons.code, code)).limit(1);
+      if (!coupon) return res.status(404).json({ error: "Coupon not found" });
+      const modes = { ...(current.couponApplicationModes || {}), [code]: input.mode };
+      const orderSettings = { ...current, couponApplicationModes: modes };
+      await db.insert(siteSettings).values({ id: 1, orderSettings }).onConflictDoUpdate({ target: siteSettings.id, set: { orderSettings, updatedAt: new Date() } });
+      await audit(req, "update", "coupon_application_mode", coupon.id, undefined, { code, mode: input.mode });
+      res.json({ success: true, code, mode: input.mode, orderSettings });
+    } catch (error) {
+      if (error instanceof z.ZodError) return res.status(400).json({ error: "Invalid coupon application mode", details: error.errors });
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to save coupon application mode" });
+    }
+  });
+
   // ---------- Coupons ----------
-  app.post("/api/coupons/validate", async (req: Request, res: Response) => {
+  app.post("/api/coupons/validate", optionalAuth, async (req: Request, res: Response) => {
     try {
       const data = couponValidateSchema.parse(req.body);
       const user = authUser(req);
       const [coupon] = await db.select().from(coupons).where(eq(coupons.code, data.code.trim().toUpperCase())).limit(1);
       if (!coupon || !coupon.active) return res.status(400).json({ error: "Invalid coupon code" });
+      if (data.autoApplyFirstLogin) {
+        if (!user || !coupon.firstOrderOnly || coupon.repeatCustomerOnly) {
+          return res.status(400).json({ error: "This welcome offer is only available to signed-in first-time customers" });
+        }
+        const [settings] = await db.select({ orderSettings: siteSettings.orderSettings }).from(siteSettings).where(eq(siteSettings.id, 1)).limit(1);
+        const configuredCode = String(settings?.orderSettings?.firstLoginPromoCode || "NEWLOGIN").trim().toUpperCase();
+        if (coupon.code.toUpperCase() !== configuredCode) {
+          return res.status(400).json({ error: "This is not the currently configured welcome offer" });
+        }
+      }
       const now = new Date();
       if (coupon.startsAt && coupon.startsAt > now) return res.status(400).json({ error: "Coupon is not active yet" });
       if (coupon.endsAt && coupon.endsAt < now) return res.status(400).json({ error: "Coupon has expired" });
       if (coupon.usageLimit != null && coupon.usageCount >= coupon.usageLimit) return res.status(400).json({ error: "Coupon usage limit reached" });
       if (Number(coupon.minimumOrderAmount || 0) > data.subtotal) return res.status(400).json({ error: `Minimum order amount is ₹${Number(coupon.minimumOrderAmount).toFixed(2)}` });
-      if (coupon.firstOrderOnly && user) {
-        const previous = await db.select({ id: orders.id }).from(orders).where(eq(orders.userId, user.id)).limit(1);
-        if (previous.length) return res.status(400).json({ error: "Coupon is valid only on your first order" });
+      const customerEmail = (data.customerEmail || user?.email || "").trim().toLowerCase();
+      const customerConditions = [];
+      if (user?.id) customerConditions.push(eq(orders.userId, user.id));
+      if (customerEmail) customerConditions.push(ilike(orders.customerEmail, customerEmail));
+      const previousOrders = customerConditions.length
+        ? await db.select({ id: orders.id }).from(orders).where(and(or(...customerConditions), ne(orders.status, "cancelled"))).limit(1)
+        : [];
+      const hasPreviousOrder = previousOrders.length > 0;
+      if (coupon.firstOrderOnly && hasPreviousOrder) {
+        return res.status(400).json({ error: "This offer is valid only for your first order" });
+      }
+      if (coupon.repeatCustomerOnly && !hasPreviousOrder) {
+        return res.status(400).json({ error: "This offer is available after your first order" });
+      }
+      if (coupon.firstOrderOnly && coupon.repeatCustomerOnly) {
+        return res.status(400).json({ error: "Coupon configuration is invalid: first-order and repeat-customer rules conflict" });
       }
       if (coupon.applicableProductIds?.length && !data.productIds.some(id => coupon.applicableProductIds.includes(id))) return res.status(400).json({ error: "Coupon does not apply to these products" });
       if (coupon.applicableCategories?.length && !data.categories.some(c => coupon.applicableCategories.includes(c))) return res.status(400).json({ error: "Coupon does not apply to these categories" });

@@ -12,6 +12,7 @@ import { useCart } from "@/context/CartContext";
 import { useWishlist } from "@/hooks/useWishlist";
 import { ProductReviews } from "@/components/ProductReviews";
 import ProductImageGallery from "@/components/ProductImageGallery";
+import StorePriceDisplay from "@/components/StorePriceDisplay";
 import { Product, ProductVariant } from "@shared/schema";
 import { useSEO } from "@/hooks/use-seo";
 import { ORGANIZATION_DATA, generateBreadcrumbs, generateProductSchema } from "@/lib/structured-data-constants";
@@ -320,7 +321,7 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
 
   const isInStock = (selectedVariant?.stockQuantity ?? product.inStock) > 0;
   const stockInfo = getStockStatus();
-  const formattedPrice = parseFloat(selectedVariant?.price ?? product.price).toLocaleString();
+  const selectedOriginalPrice = Number(selectedVariant?.price ?? product.price);
 
   return (
     <div className="min-h-screen bg-background">
@@ -386,13 +387,9 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
             {/* Price and Stock Status */}
             <div className="space-y-4">
               <div className="flex items-center space-x-4">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-primary" data-testid="text-product-price">
-                    ₹{formattedPrice}
-                  </span>
-                  <span className="text-lg text-muted-foreground" data-testid="text-product-unit">
-                    {product.unit || 'per unit'}
-                  </span>
+                <div className="space-y-1">
+                  <StorePriceDisplay price={selectedOriginalPrice} className="text-3xl font-bold text-primary" originalClassName="text-base text-muted-foreground line-through" discountClassName="text-sm font-semibold text-green-600" codeClassName="text-xs text-muted-foreground" />
+                  <span className="text-lg text-muted-foreground" data-testid="text-product-unit">{product.unit || 'per unit'}</span>
                 </div>
                 <Badge 
                   variant={stockInfo.color}

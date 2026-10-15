@@ -38,21 +38,18 @@ interface LoginResponse {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
+  // Read the saved token during the first render so protected routes do not
+  // briefly initialize as logged out after a browser refresh.
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return window.localStorage.getItem('auth_token');
+  });
   const [error, setError] = useState<string | null>(null);
   const [pendingVerification, setPendingVerification] = useState<string | null>(null);
   const [cartMigrationCallback, setCartMigrationCallback] = useState<(() => Promise<void>) | null>(null);
   const queryClient = useQueryClient();
   const [, navigate] = useLocation();
   const { toast } = useToast();
-
-  // Initialize token from localStorage on mount
-  useEffect(() => {
-    const savedToken = localStorage.getItem('auth_token');
-    if (savedToken) {
-      setToken(savedToken);
-    }
-  }, []);
 
   // Fetch user data when token is available
   const { data: user, isLoading } = useQuery<User>({
@@ -73,13 +70,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       console.log('🚀 Making auth request with token');
-      const response = await fetch('/api/auth/user', {
-        headers: {
-          'Authorization': `Bearer ${currentToken}`,
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-      });
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+      let response: Response;
+      try {
+        response = await fetch('/api/auth/user', {
+          headers: {
+            'Authorization': `Bearer ${currentToken}`,
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          throw new Error('Authentication check timed out. Please refresh and try again.');
+        }
+        throw error;
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
       
       console.log('📡 Auth response:', response.status, response.statusText);
       

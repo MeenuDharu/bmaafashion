@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, ShoppingCart, Check, AlertCircle, MapPin, User, Mail, Phone, Tag } from "lucide-react";
@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AddressSelector from "@/components/AddressSelector";
 import type { UserAddress } from "@shared/schema";
 import { queryClient } from "@/lib/queryClient";
+import { writeActiveCouponDisplay } from "@/lib/activeCouponDisplay";
 
 // Form validation schema
 const checkoutFormSchema = z.object({
@@ -45,7 +46,7 @@ function CheckoutContent() {
   const { items, getTotalPrice, clearCart, isMigrating, isLoading } = useCart();
   const { toast } = useToast();
   const { user } = useAuth();
-  const { orderSettings, policies, promotions } = useSiteSettings();
+  const { orderSettings, policies, promotions, isLoading: siteSettingsLoading } = useSiteSettings();
   const authenticatedFetch = useAuthenticatedFetch();
   const [, setLocation] = useLocation();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -53,6 +54,10 @@ function CheckoutContent() {
   const [appliedPromo, setAppliedPromo] = useState<any | null>(null);
   const [promoError, setPromoError] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"razorpay" | "cod">("razorpay");
+  useEffect(() => {
+    if (orderSettings?.onlinePaymentEnabled === false && orderSettings?.codEnabled) setPaymentMethod("cod");
+    else if (orderSettings?.onlinePaymentEnabled === false && !orderSettings?.codEnabled) setPaymentMethod("razorpay");
+  }, [orderSettings?.onlinePaymentEnabled, orderSettings?.codEnabled]);
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [orderId, setOrderId] = useState<string>("");
   const [selectedAddress, setSelectedAddress] = useState<UserAddress | null>(null);
@@ -190,7 +195,7 @@ function CheckoutContent() {
     try {
       const response = await fetch('/api/coupons/validate', {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...(localStorage.getItem('auth_token') ? { Authorization: `Bearer ${localStorage.getItem('auth_token')}` } : {}) },
-        body: JSON.stringify({ code: normalized, subtotal, productIds: items.map(i => i.product.id), categories: items.map(i => i.product.category).filter(Boolean) })
+        body: JSON.stringify({ code: normalized, subtotal, productIds: items.map(i => i.product.id), categories: items.map(i => i.product.category).filter(Boolean), customerEmail: user?.email || form.getValues("customerEmail") || undefined })
       });
       if (response.ok) {
         const result = await response.json();
@@ -205,16 +210,92 @@ function CheckoutContent() {
   };
 
   const [shippingQuote, setShippingQuote] = useState<any>(null);
-
-
+  const attemptedAutoPromoKey = useRef("");
 
   const subtotal = getTotalPrice();
+  const autoPromoCartKey = items.map(item => `${item.product.id}:${item.quantity}`).join("|");
+
+  // Share the applied percentage coupon with all storefront price displays so product
+  // cards and the cart switch from the global percentage to the selected coupon.
+  useEffect(() => {
+    if (!appliedPromo) {
+      writeActiveCouponDisplay(null);
+      return;
+    }
+    writeActiveCouponDisplay({
+      code: String(appliedPromo.code || promoCode || "").toUpperCase(),
+      discountType: appliedPromo.discountType === "fixed" ? "fixed" : "percentage",
+      discountValue: Number(appliedPromo.discountValue || 0),
+      discountAmount: Number(appliedPromo.discountAmount || 0),
+    });
+  }, [appliedPromo, promoCode]);
+
+  // Try the configured welcome coupon first for signed-in customers, then try other
+  // regular coupons marked Automatic in Commerce Features. The first eligible coupon
+  // wins, so discounts never stack. The server remains responsible for eligibility.
+  useEffect(() => {
+    const welcomeCode = String(orderSettings?.firstLoginPromoCode || "NEWLOGIN").trim().toUpperCase();
+    const globalCode = String(orderSettings?.globalDiscountCode || "STORE30").trim().toUpperCase();
+    const modes = orderSettings?.couponApplicationModes || {};
+    const candidates: Array<{ code: string; isWelcome: boolean }> = [];
+    if (user?.id && (orderSettings?.firstLoginPromoMode ?? "automatic") === "automatic" && welcomeCode) {
+      candidates.push({ code: welcomeCode, isWelcome: true });
+    }
+    Object.entries(modes).forEach(([configuredCode, mode]) => {
+      const code = String(configuredCode || "").trim().toUpperCase();
+      if (mode === "automatic" && code && code !== welcomeCode && code !== globalCode && !candidates.some(candidate => candidate.code === code)) {
+        candidates.push({ code, isWelcome: false });
+      }
+    });
+    if (siteSettingsLoading || isLoading || items.length === 0 || appliedPromo || candidates.length === 0) return;
+    const key = `${user?.id || "guest"}:${candidates.map(candidate => `${candidate.code}:${candidate.isWelcome}`).join(",")}:${subtotal}:${autoPromoCartKey}`;
+    if (attemptedAutoPromoKey.current === key) return;
+    attemptedAutoPromoKey.current = key;
+
+    let cancelled = false;
+    const tryCandidate = async (index: number): Promise<void> => {
+      if (cancelled || index >= candidates.length) return;
+      const candidate = candidates[index];
+      try {
+        const response = await fetch("/api/coupons/validate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(localStorage.getItem("auth_token") ? { Authorization: `Bearer ${localStorage.getItem("auth_token")}` } : {}),
+          },
+          body: JSON.stringify({
+            code: candidate.code,
+            subtotal,
+            productIds: items.map(item => item.product.id),
+            categories: items.map(item => item.product.category).filter(Boolean),
+            customerEmail: user?.email || form.getValues("customerEmail") || undefined,
+            ...(candidate.isWelcome ? { autoApplyFirstLogin: true } : {}),
+          }),
+        });
+        if (!response.ok) return tryCandidate(index + 1);
+        const result = await response.json();
+        if (cancelled || !result?.valid) return tryCandidate(index + 1);
+        setPromoCode(candidate.code);
+        setAppliedPromo({ ...result, discountType: result.discountType, discountValue: result.discountValue, autoApplied: true });
+        setPromoError("");
+      } catch {
+        if (!cancelled) return tryCandidate(index + 1);
+      }
+    };
+    void tryCandidate(0);
+    return () => { cancelled = true; };
+  }, [siteSettingsLoading, isLoading, user?.id, user?.email, orderSettings?.firstLoginPromoMode, orderSettings?.firstLoginPromoCode, orderSettings?.globalDiscountCode, orderSettings?.couponApplicationModes, autoPromoCartKey, subtotal, appliedPromo, form]);
+
   const inferredPromoValue = appliedPromo?.discountValue || Number((String(appliedPromo?.message || "").match(/(\d+(?:\.\d+)?)\s*%/) || [])[1] || 0);
+  const globalDiscountPercent = Math.min(100, Math.max(0, Number(orderSettings?.globalDiscountPercent ?? 30)));
+  const globalDiscountMode = orderSettings?.globalDiscountMode ?? "automatic";
   const discount = appliedPromo
     ? appliedPromo.discountType === "fixed"
       ? Math.min(subtotal, Math.max(0, Number(appliedPromo.discountValue || 0)))
       : Math.min(subtotal, subtotal * Math.min(100, Math.max(0, inferredPromoValue)) / 100)
-    : 0;
+    : globalDiscountMode === "automatic"
+      ? Math.min(subtotal, subtotal * globalDiscountPercent / 100)
+      : 0;
   const loyaltyDiscount = user ? Math.min(Math.floor(loyaltyPointsRedeemed / 10), Math.max(0, subtotal - discount)) : 0;
   const taxableSubtotal = Math.max(0, subtotal - discount - loyaltyDiscount);
   const freeThreshold = Math.max(0, Number(policies?.shipping?.freeThreshold ?? 0));
@@ -253,6 +334,15 @@ function CheckoutContent() {
 
 
   const onSubmit = async (values: CheckoutFormValues) => {
+    const minimumOrderAmount = Math.max(0, Number(orderSettings?.minimumOrderAmount ?? 0));
+    if (subtotal < minimumOrderAmount) {
+      toast({ title: "Minimum Order Amount", description: `Please add items worth at least ₹${minimumOrderAmount.toLocaleString("en-IN")} to continue.`, variant: "destructive" });
+      return;
+    }
+    if (orderSettings?.onlinePaymentEnabled === false && paymentMethod !== "cod") {
+      toast({ title: "Online Payment Unavailable", description: "Please choose Cash on Delivery or contact the store.", variant: "destructive" });
+      return;
+    }
     // Validate that an address is selected
     if (!selectedAddress && !guestAddress) {
       toast({
@@ -309,7 +399,7 @@ function CheckoutContent() {
         // Authenticated user flow
         const orderResponse = await authenticatedFetch('/api/orders', {
           method: 'POST',
-          body: JSON.stringify({ ...orderData, items: orderItems, promoCode: appliedPromo?.code || promoCode || null, paymentMethod }),
+          body: JSON.stringify({ ...orderData, items: orderItems, promoCode: appliedPromo?.code || null, paymentMethod }),
         });
 
         if (!orderResponse.ok) {
@@ -328,7 +418,7 @@ function CheckoutContent() {
           billingAddress: shippingAddressData, // Using same address for now
           useSameAddress: true,
           orderNotes: values.orderNotes,
-          promoCode: appliedPromo?.code || promoCode || undefined,
+          promoCode: appliedPromo?.code || undefined,
           paymentMethod,
           items: orderItems.map(item => ({
             productId: item.productId,
@@ -686,8 +776,9 @@ function CheckoutContent() {
                 <div className="space-y-2">
                   <p className="text-sm font-medium">Payment Method</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <Button type="button" variant={paymentMethod === "razorpay" ? "default" : "outline"} onClick={() => setPaymentMethod("razorpay")}>Online Payment</Button>
+                    {orderSettings?.onlinePaymentEnabled !== false && <Button type="button" variant={paymentMethod === "razorpay" ? "default" : "outline"} onClick={() => setPaymentMethod("razorpay")}>Online Payment</Button>}
                     {orderSettings?.codEnabled && <Button type="button" variant={paymentMethod === "cod" ? "default" : "outline"} onClick={() => setPaymentMethod("cod")}>Cash on Delivery</Button>}
+                    {orderSettings?.onlinePaymentEnabled === false && !orderSettings?.codEnabled && <p className="text-sm text-destructive">Checkout is temporarily unavailable. Please contact the store.</p>}
                   </div>
                 </div>
 
@@ -697,7 +788,7 @@ function CheckoutContent() {
                     <span>Subtotal</span>
                     <span data-testid="text-subtotal">₹{subtotal.toLocaleString()}</span>
                   </div>
-                  {discount > 0 && <div className="flex justify-between text-green-600"><span>Discount {appliedPromo?.code ? `(${appliedPromo.code})` : ""}</span><span>-₹{discount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
+                  {discount > 0 && <div className="flex justify-between text-green-600"><span>{appliedPromo?.code ? `Discount (${appliedPromo.code})` : `Automatic discount (${globalDiscountPercent}% off)`}</span><span>-₹{discount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
                   {loyaltyDiscount > 0 && <div className="flex justify-between text-green-600"><span>Rewards</span><span>-₹{loyaltyDiscount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
                   {giftCardApplied > 0 && <div className="flex justify-between text-green-600"><span>Gift card</span><span>-₹{giftCardApplied.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
                   <div className="flex justify-between">
@@ -946,10 +1037,10 @@ function CheckoutContent() {
                   onClick={form.handleSubmit(onSubmit)}
                   size="lg" 
                   className="w-full"
-                  disabled={isSubmitting || (!selectedAddress && !guestAddress)}
+                  disabled={isSubmitting || (!selectedAddress && !guestAddress) || (orderSettings?.onlinePaymentEnabled === false && !orderSettings?.codEnabled)}
                   data-testid="button-place-order"
                 >
-                  {isSubmitting ? "Processing..." : `Pay ₹${total.toLocaleString()} with Razorpay`}
+                  {isSubmitting ? "Processing..." : paymentMethod === "cod" ? `Place COD Order · ₹${total.toLocaleString("en-IN")}` : `Pay ₹${total.toLocaleString("en-IN")} with Razorpay`}
                 </Button>
               </CardContent>
             </Card>

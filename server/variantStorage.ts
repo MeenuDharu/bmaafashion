@@ -2,7 +2,7 @@
 // Add these methods to your DatabaseStorage class in storage.ts
 
 import { db } from "./db";
-import { productVariants } from "@shared/schema";
+import { productVariants, products } from "@shared/schema";
 import type { ProductVariant, InsertProductVariant } from "@shared/schema";
 import { eq, and, asc } from "drizzle-orm";
 
@@ -79,6 +79,7 @@ export class VariantStorage {
       })
       .returning();
     
+    await this.syncProductStock(productId);
     return variant;
   }
 
@@ -98,6 +99,7 @@ export class VariantStorage {
       .where(eq(productVariants.id, variantId))
       .returning();
     
+    if (variant) await this.syncProductStock(variant.productId);
     return variant;
   }
 
@@ -105,9 +107,9 @@ export class VariantStorage {
    * Delete a product variant
    */
   async deleteProductVariant(variantId: string): Promise<void> {
-    await db
-      .delete(productVariants)
-      .where(eq(productVariants.id, variantId));
+    const existing = await this.getVariantById(variantId);
+    await db.delete(productVariants).where(eq(productVariants.id, variantId));
+    if (existing) await this.syncProductStock(existing.productId);
   }
 
   /**
@@ -123,7 +125,19 @@ export class VariantStorage {
       .where(eq(productVariants.id, variantId))
       .returning();
     
+    if (variant) await this.syncProductStock(variant.productId);
     return variant;
+  }
+
+  /**
+   * Keep the parent product's stock equal to the sum of its variant quantities.
+   * Variant stock is the source of truth whenever variants exist.
+   */
+  async syncProductStock(productId: string): Promise<number> {
+    const variants = await this.getProductVariants(productId);
+    const total = variants.reduce((sum, variant) => sum + Math.max(0, Number(variant.stockQuantity) || 0), 0);
+    await db.update(products).set({ inStock: total, updatedAt: new Date() }).where(eq(products.id, productId));
+    return total;
   }
 
   /**

@@ -17,6 +17,7 @@ import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { StarRating } from "./StarRating";
 import { VariantSelectorDialog } from "./VariantSelectorDialog";
+import StorePriceDisplay from "./StorePriceDisplay";
 
 // Helper function to convert relative image paths to full API URLs
 const getImageUrl = (imagePath: string): string => {
@@ -216,7 +217,7 @@ export default function ProductCard({ product, onAddToCart, onViewDetails }: Pro
           <img
             src={currentImage}
             alt={product.name}
-            className="w-full h-full object-contain transition-transform duration-700 ease-out"
+            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
             data-testid={`img-product-${product.id}`}
           />
           
@@ -370,15 +371,9 @@ export default function ProductCard({ product, onAddToCart, onViewDetails }: Pro
       <CardFooter className="p-4 sm:p-5 pt-0 flex flex-col gap-3">
         {/* Price Section */}
         <div className="flex items-center justify-between w-full">
-          <div className="flex flex-col">
-            <span className="text-2xl sm:text-3xl font-bold text-primary" data-testid={`text-price-${product.id}`}>
-              ₹{Number(product.price).toLocaleString('en-IN')}
-            </span>
-            {product.unit && (
-              <span className="text-xs text-muted-foreground" data-testid={`text-unit-${product.id}`}>
-                {product.unit}
-              </span>
-            )}
+          <div className="flex min-w-0 flex-col gap-1">
+            <StorePriceDisplay price={product.price} className="text-xl sm:text-2xl font-bold text-primary" originalClassName="text-sm text-muted-foreground line-through" discountClassName="text-xs font-semibold text-green-600" />
+            {product.unit && <span className="text-xs text-muted-foreground" data-testid={`text-unit-${product.id}`}>{product.unit}</span>}
           </div>
           
           {/* Stock Indicator */}
@@ -434,7 +429,7 @@ export default function ProductCard({ product, onAddToCart, onViewDetails }: Pro
                     />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">{product.name}</p>
-                      <p className="text-sm text-muted-foreground">₹{Number(product.price).toLocaleString('en-IN')}</p>
+                      <StorePriceDisplay price={product.price} className="text-sm font-bold text-primary" originalClassName="text-xs text-muted-foreground line-through" discountClassName="text-xs font-semibold text-green-600" />
                     </div>
                   </div>
 

@@ -1,3 +1,4 @@
+import StorePriceDisplay from "@/components/StorePriceDisplay";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Heart, ShoppingCart, Trash2, Package } from "lucide-react";
@@ -197,10 +198,8 @@ function WishlistContent() {
                   <CardTitle className="text-lg" data-testid={`text-product-name-${item.productId}`}>
                     {item.product.name}
                   </CardTitle>
-                  <div className="flex items-center justify-between">
-                    <span className="text-2xl font-bold text-primary" data-testid={`text-price-${item.productId}`}>
-                      ₹{item.product.price}
-                    </span>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <StorePriceDisplay price={item.product.price} className="text-xl sm:text-2xl font-bold text-primary" originalClassName="text-sm text-muted-foreground line-through" discountClassName="text-xs font-semibold text-green-600" />
                     <Badge variant="secondary">{item.product.category}</Badge>
                   </div>
                 </CardHeader>

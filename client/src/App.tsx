@@ -62,6 +62,7 @@ import AdminCommerceFeatures from "@/pages/admin/AdminCommerceFeatures";
 import { AuthProvider } from "@/context/AuthContext";
 import AdminRoute from "@/components/AdminRoute";
 import MobileBottomNav from "@/components/MobileBottomNav";
+import GlobalLoadingIndicator from "@/components/GlobalLoadingIndicator";
 
 // ── Storefront Extras: maintenance, cookie consent, popup, tracking ──
 function StorefrontExtras() {
@@ -454,6 +455,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
+        <GlobalLoadingIndicator />
         <AuthProvider>
           <CartProvider>
             <Toaster />

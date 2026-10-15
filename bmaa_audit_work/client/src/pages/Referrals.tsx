@@ -1,0 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
+import { useAuthenticatedFetch } from "@/context/AuthContext";
+import { Button } from "@/components/ui/button";
+export default function Referrals(){const f=useAuthenticatedFetch();const q=useQuery({queryKey:["/api/referrals"],queryFn:async()=>{const r=await f("/api/referrals");return r.json();}});const code=q.data?.code?.code;return <div className="max-w-3xl mx-auto px-4 py-10 space-y-6"><h1 className="text-3xl font-bold">Refer a Friend</h1><div className="border rounded-xl p-6"><p className="text-muted-foreground">Your referral code</p><p className="text-3xl font-bold tracking-widest my-3">{code||"Loading..."}</p><Button onClick={()=>code&&navigator.clipboard.writeText(code)}>Copy Code</Button><p className="text-sm mt-4">Your friend can apply this code after creating an account. Rewards are issued when the referred order is completed.</p></div></div>}

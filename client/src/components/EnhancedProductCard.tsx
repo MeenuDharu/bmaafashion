@@ -1,3 +1,4 @@
+import StorePriceDisplay from "@/components/StorePriceDisplay";
 import { useState } from "react";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -77,7 +78,7 @@ export default function EnhancedProductCard({
         <img 
           src={currentImage} 
           alt={product.name}
-          className="w-full h-full object-contain transition-transform duration-700 ease-out"
+          className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-110"
           loading="lazy"
           decoding="async"
           data-testid={`img-product-${product.id}`}
@@ -212,9 +213,7 @@ export default function EnhancedProductCard({
       {/* Footer with Price */}
       <CardFooter className="p-4 pt-0 flex items-center justify-between">
         <div className="flex flex-col">
-          <span className="text-2xl font-bold text-primary" data-testid={`text-price-${product.id}`}>
-            ₹{Number(product.price).toLocaleString('en-IN')}
-          </span>
+          <StorePriceDisplay price={product.price} className="text-xl sm:text-2xl font-bold text-primary" originalClassName="text-sm text-muted-foreground line-through" discountClassName="text-xs font-semibold text-green-600" />
           {product.unit && (
             <span className="text-xs text-muted-foreground">
               {product.unit}

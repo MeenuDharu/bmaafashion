@@ -1666,6 +1666,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         body: JSON.stringify(req.body, null, 2)
       });
       const validatedData = insertProductSchema.parse(req.body);
+      // Variant quantities are the source of truth when a product has variants.
+      // Ignore a conflicting parent stock value so product stock cannot drift.
+      const existingVariants = await db.select({ stockQuantity: productVariants.stockQuantity })
+        .from(productVariants).where(eq(productVariants.productId, id));
+      if (existingVariants.length > 0) {
+        validatedData.inStock = existingVariants.reduce(
+          (total, variant) => total + Math.max(0, Number(variant.stockQuantity) || 0), 0
+        );
+      }
       console.log('✅ Validation passed, updating product...');
       const product = await storage.updateProduct(id, validatedData);
       if (!product) {
@@ -1719,6 +1728,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching user:', error);
       res.status(500).json({ error: 'Failed to fetch user' });
+    }
+  });
+
+  // Admin-only manual email verification for customer support cases.
+  app.patch('/api/admin/users/:id/verify-email', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const user = await storage.getUser(id);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      if (user.emailVerified) {
+        const { password, ...userWithoutPassword } = user;
+        return res.json({ message: 'Email is already verified', user: userWithoutPassword });
+      }
+
+      const updatedUser = await storage.verifyUserEmail(id);
+      if (!updatedUser) {
+        return res.status(500).json({ error: 'Unable to verify this email address' });
+      }
+      const { password, ...userWithoutPassword } = updatedUser;
+      return res.json({ message: 'Customer email verified successfully', user: userWithoutPassword });
+    } catch (error) {
+      console.error('Admin manual email verification failed:', error);
+      return res.status(500).json({ error: 'Failed to manually verify customer email' });
     }
   });
 
@@ -5856,8 +5890,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Order Settings
     orderSettings: z.object({
       codEnabled: z.boolean().optional(),
+      onlinePaymentEnabled: z.boolean().optional(),
+      minimumOrderAmount: z.number().min(0).max(10000000).optional(),
       autoCancelHours: z.number().int().min(1).max(168).optional(),
       deliveryMessage: z.string().optional(),
+      firstLoginPromoCode: z.string().max(64).optional(),
+      firstLoginPromoMode: z.enum(["automatic", "manual"]).optional(),
+      firstLoginPromoPercent: z.number().min(0).max(100).optional(),
+      globalDiscountPercent: z.number().min(0).max(100).optional(),
+      globalDiscountMode: z.enum(["automatic", "manual"]).optional(),
+      globalDiscountCode: z.string().max(64).optional(),
+      couponApplicationModes: z.record(z.string(), z.enum(["automatic", "manual"])).optional(),
     }).optional(),
     // Tracking
     trackingSettings: z.object({

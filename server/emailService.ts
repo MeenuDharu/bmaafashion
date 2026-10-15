@@ -22,7 +22,7 @@ if (!process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
 
 // Create SMTP transporter with Outlook/Office365 configuration
 const transporter = nodemailer.createTransport({
-  host: "smtp.office365.com",
+  host: "smtp.gmail.com",
   port: 587,
   secure: false, // true for 465, false for other ports
   auth: {

@@ -17,6 +17,7 @@ export const coupons = pgTable("coupons", {
   usageCount: integer("usage_count").notNull().default(0),
   perCustomerLimit: integer("per_customer_limit").default(1),
   firstOrderOnly: boolean("first_order_only").notNull().default(false),
+  repeatCustomerOnly: boolean("repeat_customer_only").notNull().default(false),
   applicableProductIds: text("applicable_product_ids").array().default([]).notNull(),
   applicableCategories: text("applicable_categories").array().default([]).notNull(),
   startsAt: timestamp("starts_at"),
@@ -199,7 +200,7 @@ export const insertCouponSchema = createInsertSchema(coupons).omit({ id: true, u
 export const insertReturnRequestSchema = createInsertSchema(returnRequests).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertGiftCardSchema = createInsertSchema(giftCards).omit({ id: true, remainingAmount: true, createdAt: true, updatedAt: true });
 
-export const couponValidateSchema = z.object({ code: z.string().min(1).max(64), subtotal: z.coerce.number().min(0), productIds: z.array(z.string()).default([]), categories: z.array(z.string()).default([]) });
+export const couponValidateSchema = z.object({ code: z.string().min(1).max(64), subtotal: z.coerce.number().min(0), productIds: z.array(z.string()).default([]), categories: z.array(z.string()).default([]), customerEmail: z.string().email().optional(), autoApplyFirstLogin: z.boolean().optional() });
 export const supportMessageSchema = z.object({ message: z.string().min(1).max(5000) });
 export const abandonedCartTrackSchema = z.object({ sessionId: z.string().optional(), customerEmail: z.string().email().optional(), customerName: z.string().optional(), items: z.array(z.any()).min(1), cartTotal: z.coerce.number().min(0) });
 

@@ -3,6 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <style>
+      #bmaa-initial-loader { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; background:#fff; color:#171717; font-family:Arial,sans-serif; transition:opacity 180ms ease,visibility 180ms ease; }
+      #bmaa-initial-loader.bmaa-loader-hidden { opacity:0; visibility:hidden; pointer-events:none; }
+      .bmaa-boot-card { display:flex; flex-direction:column; align-items:center; gap:14px; padding:28px; }
+      .bmaa-boot-logo { display:grid; place-items:center; width:58px; height:58px; border:2px solid #d4a72c; border-radius:50%; background:#171717; color:#facc3d; font-size:28px; font-weight:800; }
+      .bmaa-boot-brand { font-size:20px; font-weight:700; letter-spacing:.02em; }
+      .bmaa-boot-message { color:#737373; font-size:13px; }
+      .bmaa-boot-spinner { display:inline-block; width:28px; height:28px; border:3px solid #f1df9c; border-top-color:#eabf26; border-radius:50%; animation:bmaa-spin .75s linear infinite; }
+      @keyframes bmaa-spin { to { transform:rotate(360deg); } }
+    </style>
     <title>Bmaafashion | Fashion & Style Collections</title>
     <meta name="description" content="Premium fashion collections, curated styles, and trendy pieces. Start your fashion journey with Bmaafashion." />
     
@@ -24,6 +34,14 @@
     <link href="https://fonts.googleapis.com/css2?family=Architects+Daughter&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Fira+Code:wght@300..700&family=Geist+Mono:wght@100..900&family=Geist:wght@100..900&family=IBM+Plex+Mono:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,100;1,200;1,300;1,400;1,500;1,600;1,700&family=IBM+Plex+Sans:ital,wght@0,100..700;1,100..700&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Lora:ital,wght@0,400..700;1,400..700&family=Merriweather:ital,opsz,wght@0,18..144,300..900;1,18..144,300..900&family=Montserrat:ital,wght@0,100..900;1,100..900&family=Open+Sans:ital,wght@0,300..800;1,300..800&family=Outfit:wght@100..900&family=Oxanium:wght@200..800&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Roboto+Mono:ital,wght@0,100..700;1,100..700&family=Roboto:ital,wght@0,100..900;1,100..900&family=Source+Code+Pro:ital,wght@0,200..900;1,200..900&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
   </head>
   <body>
+    <div id="bmaa-initial-loader" role="status" aria-live="polite" aria-label="Loading BMAA Fashion">
+      <div class="bmaa-boot-card">
+        <div class="bmaa-boot-logo">B</div>
+        <div class="bmaa-boot-brand">BMAA Fashion</div>
+        <div class="bmaa-boot-spinner" aria-hidden="true"></div>
+        <div class="bmaa-boot-message">Preparing your fashion experience…</div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <!-- This is a replit script which adds a banner on the top of the page when opened in development mode outside the replit environment -->

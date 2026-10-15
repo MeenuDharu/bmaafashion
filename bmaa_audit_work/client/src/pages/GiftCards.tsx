@@ -1,0 +1,4 @@
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+export default function GiftCards(){const [code,setCode]=useState("");const [result,setResult]=useState<any>();const check=async()=>{const r=await fetch("/api/gift-cards/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code})});setResult(await r.json())};return <div className="max-w-2xl mx-auto px-4 py-10 space-y-6"><h1 className="text-3xl font-bold">Gift Cards</h1><div className="border rounded-xl p-6 space-y-3"><p>Check your BMAA Fashion gift card balance.</p><div className="flex gap-2"><Input value={code} onChange={e=>setCode(e.target.value.toUpperCase())} placeholder="Gift card code"/><Button onClick={check}>Check Balance</Button></div>{result&&<div className="p-3 rounded bg-muted">{result.valid?`Balance: ₹${result.remainingAmount}`:result.error}</div>}</div></div>}

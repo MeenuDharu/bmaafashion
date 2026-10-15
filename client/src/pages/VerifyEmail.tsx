@@ -27,34 +27,61 @@ export default function VerifyEmail() {
       return;
     }
 
-    // Verify email with token
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+
     const verifyEmail = async () => {
       try {
-        const response = await fetch(`/api/auth/verify-email/${token}`, {
+        const response = await fetch(`/api/auth/verify-email/${encodeURIComponent(token)}`, {
           method: 'GET',
           credentials: 'include',
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
         });
 
-        const data = await response.json();
+        const rawResponse = await response.text();
+        let data: { message?: string; success?: boolean; verified?: boolean } = {};
+        if (rawResponse) {
+          try {
+            data = JSON.parse(rawResponse) as typeof data;
+          } catch {
+            throw new Error('The server returned an unexpected response. Please try the verification link again.');
+          }
+        }
 
-        if (response.ok) {
+        if (cancelled) return;
+        if (response.ok && (data.success !== false)) {
           setVerificationStatus('success');
+          setError(null);
           toast({
-            title: "Email Verified!",
-            description: "Your email has been successfully verified. You can now log in to your account.",
+            title: 'Email Verified!',
+            description: data.message || 'Your email has been verified. You can now log in.',
           });
         } else {
           setVerificationStatus('error');
-          setError(data.message || 'Failed to verify email address');
+          setError(data.message || 'Failed to verify email address. Please request a new verification link.');
         }
       } catch (error) {
+        if (cancelled) return;
         setVerificationStatus('error');
-        setError('Network error. Please check your connection and try again.');
+        setError(error instanceof DOMException && error.name === 'AbortError'
+          ? 'Verification is taking too long. Please check your connection and try again.'
+          : error instanceof Error
+            ? error.message
+            : 'Network error. Please check your connection and try again.');
         console.error('Email verification error:', error);
+      } finally {
+        window.clearTimeout(timeoutId);
       }
     };
 
-    verifyEmail();
+    void verifyEmail();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [token, toast]);
 
   const handleLoginRedirect = () => {

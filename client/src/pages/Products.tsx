@@ -390,9 +390,6 @@ export default function Products({ onAddToCart, onViewProductDetails }: Products
     );
   }
 
-  // Get current category name for breadcrumb and hero
-  const currentCategoryName = selectedCategory === "all" ? "Home" : selectedCategory;
-
   // Get selected category data for hero section display
   const selectedCategoryData = useMemo(() => {
     if (selectedCategory === "all") {
@@ -426,6 +423,11 @@ export default function Products({ onAddToCart, onViewProductDetails }: Products
       isSubcategory: true
     };
   }, [selectedCategory, categoriesData]);
+
+  // Get current category name for breadcrumb and hero
+  const currentCategoryName = selectedCategory === "all" ? "Home" : selectedCategory;
+
+
 
   return (
     <div className="min-h-screen bg-white">
@@ -668,7 +670,7 @@ export default function Products({ onAddToCart, onViewProductDetails }: Products
                           <img
                             src={featuredProduct.images?.[0] ? `/api/images/${featuredProduct.images[0]}` : '/placeholder-image.jpg'}
                             alt={featuredProduct.name}
-                            className="w-full aspect-[3/4] object-contain bg-muted transition-transform duration-500"
+                            className="w-full h-48 object-cover hover:scale-105 transition-transform duration-500"
                           />
                           <div className="p-4 space-y-3 bg-gradient-to-b from-white to-muted/20">
                             <h4 className="font-semibold text-sm line-clamp-2 text-foreground">{featuredProduct.name}</h4>

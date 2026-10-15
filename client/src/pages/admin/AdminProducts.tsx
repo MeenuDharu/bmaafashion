@@ -705,6 +705,7 @@ function AdminProductsContent() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Stock Quantity</FormLabel>
+                        <p className="text-xs text-muted-foreground">If this product has variants, the total is calculated automatically from all variant stock quantities. Add, edit, or remove variant quantities in Manage Variants.</p>
                         <FormControl>
                           <Input type="number" {...field} data-testid="input-product-stock" />
                         </FormControl>

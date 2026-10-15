@@ -514,3 +514,103 @@ img[loading="lazy"] { content-visibility: auto; }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+/* Global loading states: static boot screen, API progress, and action feedback. */
+#bmaa-initial-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 180ms ease, visibility 180ms ease;
+}
+#bmaa-initial-loader.bmaa-loader-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.bmaa-boot-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 28px;
+  color: #171717;
+  font-family: inherit;
+}
+.bmaa-boot-logo {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 2px solid #d4a72c;
+  border-radius: 50%;
+  background: #171717;
+  color: #facc3d;
+  font-size: 28px;
+  font-weight: 800;
+}
+.bmaa-boot-brand { font-size: 20px; font-weight: 700; letter-spacing: .02em; }
+.bmaa-boot-message { color: #737373; font-size: 13px; }
+.bmaa-boot-spinner, .bmaa-loading-spinner {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border: 3px solid #f1df9c;
+  border-top-color: #eabf26;
+  border-radius: 50%;
+  animation: bmaa-spin .75s linear infinite;
+}
+.bmaa-loading-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 10001;
+  overflow: hidden;
+  background: rgba(234, 191, 38, .18);
+  pointer-events: none;
+}
+.bmaa-loading-progress span {
+  display: block;
+  width: 35%;
+  height: 100%;
+  background: #eabf26;
+  animation: bmaa-progress 1.1s ease-in-out infinite;
+}
+.bmaa-action-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 15, 15, .28);
+  backdrop-filter: blur(1px);
+}
+.bmaa-action-loading-card {
+  display: flex;
+  min-width: 190px;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(234, 191, 38, .35);
+  border-radius: 14px;
+  background: #fff;
+  padding: 24px 30px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .14);
+}
+.bmaa-action-loading-card .bmaa-loading-spinner { width: 32px; height: 32px; }
+@keyframes bmaa-spin { to { transform: rotate(360deg); } }
+@keyframes bmaa-progress {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(390%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bmaa-boot-spinner, .bmaa-loading-spinner, .bmaa-loading-progress span { animation-duration: 2s; }
+  #bmaa-initial-loader { transition: none; }
+}

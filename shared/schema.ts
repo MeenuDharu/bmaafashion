@@ -813,7 +813,10 @@ export const siteSettings = pgTable("site_settings", {
   }>(),
   // Order Settings
   orderSettings: jsonb("order_settings").$type<{
-    codEnabled?: boolean; autoCancelHours?: number; deliveryMessage?: string;
+    codEnabled?: boolean; onlinePaymentEnabled?: boolean; minimumOrderAmount?: number; autoCancelHours?: number; deliveryMessage?: string;
+    firstLoginPromoCode?: string; firstLoginPromoMode?: "automatic" | "manual"; firstLoginPromoPercent?: number;
+    globalDiscountPercent?: number; globalDiscountMode?: "automatic" | "manual"; globalDiscountCode?: string;
+    couponApplicationModes?: Record<string, "automatic" | "manual">;
   }>(),
   // Tracking
   trackingSettings: jsonb("tracking_settings").$type<{

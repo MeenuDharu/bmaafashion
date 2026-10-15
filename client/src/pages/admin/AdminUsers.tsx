@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { 
   Search,
@@ -41,6 +41,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuthenticatedFetch } from "@/context/AuthContext";
 import AdminRoute from "@/components/AdminRoute";
 import type { User } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
 
 function AdminUsersContent() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -48,6 +49,30 @@ function AdminUsersContent() {
   const [isUserDetailOpen, setIsUserDetailOpen] = useState(false);
   
   const authenticatedFetch = useAuthenticatedFetch();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const verifyEmailMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const response = await authenticatedFetch(`/api/admin/users/${userId}/verify-email`, {
+        method: "PATCH",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || data.message || "Failed to verify customer email");
+      return data as { message: string; user: User };
+    },
+    onSuccess: (data) => {
+      setSelectedUser(data.user);
+      queryClient.setQueryData<User[]>(["/api/admin/users"], (current) =>
+        current?.map((user) => user.id === data.user.id ? data.user : user)
+      );
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      toast({ title: "Email verified", description: data.message });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Verification failed", description: error.message, variant: "destructive" });
+    },
+  });
 
   const { data: users, isLoading } = useQuery({
     queryKey: ['/api/admin/users'],
@@ -344,10 +369,23 @@ function AdminUsersContent() {
                       <span>Account Status:</span>
                       <Badge variant="default">Active</Badge>
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-3">
                       <span>Email Verified:</span>
-                      <Badge variant="default">Verified</Badge>
+                      <Badge variant={selectedUser.emailVerified ? "default" : "destructive"}>
+                        {selectedUser.emailVerified ? "Verified" : "Not verified"}
+                      </Badge>
                     </div>
+                    {!selectedUser.emailVerified && (
+                      <Button
+                        type="button"
+                        onClick={() => verifyEmailMutation.mutate(selectedUser.id)}
+                        disabled={verifyEmailMutation.isPending}
+                        className="w-full mt-3"
+                      >
+                        <UserCheck className="h-4 w-4 mr-2" />
+                        {verifyEmailMutation.isPending ? "Verifying..." : "Manually Verify Email"}
+                      </Button>
+                    )}
                     <div className="flex items-center justify-between">
                       <span>Two-Factor Authentication:</span>
                       <Badge variant="secondary">Disabled</Badge>

@@ -183,6 +183,8 @@ const settingsSchema = z.object({
   }).optional(),
   orderSettings: z.object({
     codEnabled: z.boolean().optional(),
+    onlinePaymentEnabled: z.boolean().optional(),
+    minimumOrderAmount: z.coerce.number().min(0).max(10000000).optional(),
     autoCancelHours: z.coerce.number().int().min(1).max(168).optional(),
     deliveryMessage: z.string().optional(),
   }).optional(),
@@ -416,7 +418,7 @@ const defaultValues: SettingsForm = {
     { id: "4", label: "Easy Returns", icon: "RotateCcw", active: true },
   ],
   productSettings: { perPage: 12, defaultSort: "name", newBadgeDays: 30, lowStockThreshold: 5 },
-  orderSettings: { codEnabled: false, autoCancelHours: 24, deliveryMessage: "Estimated delivery: 5-7 business days" },
+  orderSettings: { codEnabled: false, onlinePaymentEnabled: true, minimumOrderAmount: 0, autoCancelHours: 24, deliveryMessage: "Estimated delivery: 5-7 business days" },
   trackingSettings: { googleAnalyticsId: "", facebookPixelId: "" },
   cookieConsent: { enabled: true, message: "We use cookies to improve your experience on our site.", acceptText: "Accept", declineText: "Decline" },
   pageBanners: {
@@ -491,7 +493,7 @@ function AdminSettingsContent() {
         countdownTimer: (settings.countdownTimer as any) ?? defaultValues.countdownTimer,
         trustBadges: (settings.trustBadges as any[]) ?? defaultValues.trustBadges,
         productSettings: (settings.productSettings as any) ?? defaultValues.productSettings,
-        orderSettings: (settings.orderSettings as any) ?? defaultValues.orderSettings,
+        orderSettings: { ...defaultValues.orderSettings, ...(settings.orderSettings as SettingsForm["orderSettings"] | undefined) },
         trackingSettings: (settings.trackingSettings as any) ?? defaultValues.trackingSettings,
         cookieConsent: (settings.cookieConsent as any) ?? defaultValues.cookieConsent,
         pageBanners: (settings.pageBanners as any) ?? defaultValues.pageBanners,
@@ -1090,6 +1092,15 @@ function AdminSettingsContent() {
                     <CardDescription>Configure order options shown during checkout.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    <FormField control={form.control} name="orderSettings.onlinePaymentEnabled" render={({ field }) => (
+                      <FormItem className="flex items-center gap-3 rounded-md border border-border p-3">
+                        <FormControl><Switch checked={field.value !== false} onCheckedChange={field.onChange} /></FormControl>
+                        <div>
+                          <FormLabel className="!mt-0">Enable Online Payment (Razorpay)</FormLabel>
+                          <p className="text-xs text-muted-foreground">Turn off to prevent new orders from using online payment. Razorpay API credentials remain in server environment variables.</p>
+                        </div>
+                      </FormItem>
+                    )} />
                     <FormField control={form.control} name="orderSettings.codEnabled" render={({ field }) => (
                       <FormItem className="flex items-center gap-3 rounded-md border border-border p-3">
                         <FormControl><Switch checked={!!field.value} onCheckedChange={field.onChange} /></FormControl>
@@ -1100,6 +1111,14 @@ function AdminSettingsContent() {
                       </FormItem>
                     )} />
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <FormField control={form.control} name="orderSettings.minimumOrderAmount" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Minimum Order Amount (₹)</FormLabel>
+                          <FormControl><Input type="number" min="0" step="0.01" value={field.value ?? 0} onChange={(e) => field.onChange(Number(e.target.value))} /></FormControl>
+                          <p className="text-xs text-muted-foreground">Set 0 to allow orders of any amount. The server validates this before creating an order.</p>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
                       <FormField control={form.control} name="orderSettings.autoCancelHours" render={({ field }) => (
                         <FormItem>
                           <FormLabel>Auto-cancel Unpaid Orders (hours)</FormLabel>
