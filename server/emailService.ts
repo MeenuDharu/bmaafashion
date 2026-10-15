@@ -1097,7 +1097,7 @@ export async function sendVerificationEmail(
     templateData: {
       recipientName,
       verificationToken,
-      verificationLink: `${process.env.DOMAIN || "http://localhost:5000"}/verify-email?token=${verificationToken}`,
+      verificationLink: `${process.env.DOMAIN || "http://localhost:5000/"}verify-email?token=${verificationToken}`,
     },
   });
 }
@@ -1117,7 +1117,7 @@ export async function sendPasswordResetEmail(
     templateData: {
       recipientName,
       resetToken,
-      resetLink: `${process.env.DOMAIN || "http://localhost:5000"}/reset-password?token=${resetToken}`,
+      resetLink: `${process.env.DOMAIN || "http://localhost:5000/"}reset-password?token=${resetToken}`,
     },
   });
 }
@@ -1528,7 +1528,7 @@ export async function processEmailQueue(): Promise<void> {
           "verificationToken" in email.templateData
         ) {
           console.log(
-            `  [DEV] Verification link: ${process.env.DOMAIN || "http://localhost:5000"}/verify-email?token=${email.templateData.verificationToken}`,
+            `  [DEV] Verification link: ${process.env.DOMAIN || "http://localhost:5000/"}verify-email?token=${email.templateData.verificationToken}`,
           );
         }
 
