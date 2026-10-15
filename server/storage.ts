@@ -1828,12 +1828,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   // SECURE order creation - prevents price tampering and ensures atomicity
-  private async calculateShippingCost(tx: any, shippingAddress: string, subtotal: number, items: any[]): Promise<number> {
-    const lines = String(shippingAddress || "").split(/\n/).map(v => v.trim()).filter(Boolean);
-    const locationLine = lines[2] || "";
-    const parts = locationLine.split(",").map(v => v.trim());
-    const state = (parts.length > 1 ? parts.slice(1).join(",") : "").replace(/\b\d{5,6}\b/g, "").trim().toLowerCase();
-    const country = (lines[3] || "").trim().toLowerCase();
+  private async calculateShippingCost(tx: any, shippingAddress: string | Record<string, any>, subtotal: number, items: any[]): Promise<number> {
+    // Checkout normally stores a formatted address string. Also accept structured addresses
+    // and multiline street addresses so valid saved state/country values are not rejected.
+    let state = "";
+    let country = "";
+    if (shippingAddress && typeof shippingAddress === "object") {
+      state = String(shippingAddress.state || shippingAddress.stateName || "").trim().toLowerCase();
+      country = String(shippingAddress.country || shippingAddress.countryName || "").trim().toLowerCase();
+    } else {
+      const lines = String(shippingAddress || "").split(/\r?\n/).map(v => v.trim()).filter(Boolean)
+        .filter(v => !/^phone\s*:/i.test(v));
+      // Country is the final non-phone line; find the city/state line by its comma,
+      // rather than relying on a fixed line number (street addresses may span lines).
+      country = (lines[lines.length - 1] || "").trim().toLowerCase();
+      const locationLine = [...lines].reverse().find(v => v.includes(",")) || "";
+      const parts = locationLine.split(",").map(v => v.trim());
+      state = (parts.length > 1 ? parts.slice(1).join(",") : "")
+        .replace(/\b\d{5,6}\b/g, "").trim().toLowerCase();
+    }
     if (!state || !country) {
       throw new Error("A delivery address with a valid state and country is required to calculate shipping.");
     }

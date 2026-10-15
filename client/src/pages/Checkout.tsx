@@ -810,7 +810,7 @@ function CheckoutContent() {
                     <span>Subtotal</span>
                     <span data-testid="text-subtotal">₹{subtotal.toLocaleString()}</span>
                   </div>
-                  {discount > 0 && <div className="flex justify-between text-green-600"><span>"Discount"</span><span>-₹{discount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
+                  {discount > 0 && <div className="flex justify-between text-green-600"><span>Discount</span><span>-₹{discount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
                   {giftCardApplied > 0 && <div className="flex justify-between text-green-600"><span>Gift card</span><span>-₹{giftCardApplied.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
                   <div className="flex justify-between">
                     <span>Shipping</span>
