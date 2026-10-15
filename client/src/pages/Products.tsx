@@ -119,7 +119,9 @@ export default function Products({ onAddToCart, onViewProductDetails }: Products
       if (subcategoryParam) {
         setSelectedCategory(subcategoryParam);
       } else if (categoryParam) {
-        setSelectedCategory("all");
+        // Home-page category links pass the main category in the URL.
+        // Select it here so the existing product filter shows only that category.
+        setSelectedCategory(categoryParam);
       } else {
         setSelectedCategory("all");
       }
