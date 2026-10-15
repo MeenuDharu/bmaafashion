@@ -94,7 +94,7 @@ export default function AdminReviews() {
   const reviewsPerPage = 20;
 
   // Fetch review statistics
-  const { data: stats, isLoading: statsLoading } = useQuery<ReviewStats>({
+  const { data: stats, isLoading: statsLoading, isError: statsError } = useQuery<ReviewStats>({
     queryKey: ['/api/admin/reviews/stats'],
     queryFn: async () => {
       const response = await authenticatedFetch('/api/admin/reviews/stats');
@@ -102,10 +102,12 @@ export default function AdminReviews() {
       return response.json();
     },
     enabled: !!user && user.role === 'admin',
+    refetchOnWindowFocus: true,
+    refetchInterval: 10000,
   });
 
   // Fetch reviews with filters
-  const { data: reviewsData, isLoading: reviewsLoading } = useQuery({
+  const { data: reviewsData, isLoading: reviewsLoading, isError: reviewsError } = useQuery({
     queryKey: ['/api/admin/reviews', currentPage, statusFilter, ratingFilter, searchTerm],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -121,6 +123,8 @@ export default function AdminReviews() {
       return response.json();
     },
     enabled: !!user && user.role === 'admin',
+    refetchOnWindowFocus: true,
+    refetchInterval: 10000,
   });
 
   // Delete review mutation
@@ -148,6 +152,27 @@ export default function AdminReviews() {
         variant: "destructive" 
       });
     },
+  });
+
+  // Approve or return a review to pending moderation.
+  const approveReviewMutation = useMutation({
+    mutationFn: async ({ reviewId, approved }: { reviewId: string; approved: boolean }) => {
+      const response = await authenticatedFetch(`/api/admin/reviews/${reviewId}/approve`, {
+        method: 'PUT',
+        body: JSON.stringify({ approved }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to update review approval');
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/reviews'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/reviews/stats'] });
+      toast({ title: "Review moderation updated" });
+    },
+    onError: (error: Error) => toast({ title: "Error", description: error.message, variant: "destructive" }),
   });
 
   // Flag/unflag review mutation
@@ -181,15 +206,9 @@ export default function AdminReviews() {
   });
 
   const getStatusBadge = (review: ReviewWithDetails) => {
-    // This would be based on your moderation system
-    // For now, we'll use placeholder logic
-    if (review.helpfulVotes !== null && review.helpfulVotes !== undefined && (review.helpfulVotes ?? 0) < -5) {
-      return <Badge variant="destructive">Flagged</Badge>;
-    }
-    if (review.isVerifiedPurchase) {
-      return <Badge variant="secondary">Verified</Badge>;
-    }
-    return <Badge variant="outline">Public</Badge>;
+    if (review.isFlagged) return <Badge variant="destructive">Flagged</Badge>;
+    if (review.isApproved === false) return <Badge variant="outline">Pending approval</Badge>;
+    return <Badge variant="secondary">Approved</Badge>;
   };
 
   const getUserDisplayName = (user?: { firstName?: string; lastName?: string }) => {
@@ -237,6 +256,14 @@ export default function AdminReviews() {
   return (
     <AdminLayout>
       <div className="container mx-auto p-6 space-y-6 max-w-7xl">
+        {(statsError || reviewsError) && (
+          <Card className="border-destructive">
+            <CardContent className="p-4 text-sm text-destructive">
+              Could not load customer reviews. Please check that you are logged in as an administrator and that the review API is reachable, then refresh this page.
+            </CardContent>
+          </Card>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -440,14 +467,24 @@ export default function AdminReviews() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        title={review.isApproved ? "Return to pending" : "Approve review"}
+                        onClick={() => approveReviewMutation.mutate({ reviewId: review.id, approved: !review.isApproved })}
+                        disabled={approveReviewMutation.isPending}
+                        data-testid={`approve-review-${review.id}`}
+                      >
+                        {review.isApproved ? <XCircle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4 text-green-600" />}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => flagReviewMutation.mutate({ 
                           reviewId: review.id, 
-                          flagged: (review.helpfulVotes ?? 0) > -5 
+                          flagged: !review.isFlagged 
                         })}
                         disabled={flagReviewMutation.isPending}
                         data-testid={`flag-review-${review.id}`}
                       >
-                        <Flag className={`h-4 w-4 ${(review.helpfulVotes ?? 0) < -5 ? 'text-red-500' : ''}`} />
+                        <Flag className={`h-4 w-4 ${review.isFlagged ? 'text-red-500' : ''}`} />
                       </Button>
                       <Button
                         variant="ghost"

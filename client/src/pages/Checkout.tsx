@@ -210,6 +210,7 @@ function CheckoutContent() {
   };
 
   const [shippingQuote, setShippingQuote] = useState<any>(null);
+  const [isShippingQuoteLoading, setIsShippingQuoteLoading] = useState(false);
   const attemptedAutoPromoKey = useRef("");
 
   const subtotal = getTotalPrice();
@@ -296,11 +297,13 @@ function CheckoutContent() {
     : globalDiscountMode === "automatic"
       ? Math.min(subtotal, subtotal * globalDiscountPercent / 100)
       : 0;
-  const loyaltyDiscount = user ? Math.min(Math.floor(loyaltyPointsRedeemed / 10), Math.max(0, subtotal - discount)) : 0;
+  const loyaltyDiscount = 0; // Rewards redemption is disabled in checkout UI.
   const taxableSubtotal = Math.max(0, subtotal - discount - loyaltyDiscount);
-  const freeThreshold = Math.max(0, Number(policies?.shipping?.freeThreshold ?? 0));
-  const configuredShipping = Math.max(0, Number(policies?.shipping?.shippingCost ?? 0));
-  const shipping = shippingQuote ? Number(shippingQuote.shipping || 0) : (freeThreshold > 0 && taxableSubtotal >= freeThreshold ? 0 : configuredShipping);
+  // Shipping is destination-state based and configured only in Admin → Commerce Features → Delivery.
+  // Until a valid address state has been quoted, do not display a misleading Site Settings fallback.
+  const shipping = shippingQuote ? Number(shippingQuote.shipping || 0) : 0;
+  const shippingAddressForQuote = selectedAddress || guestAddress;
+  const hasValidShippingState = Boolean(shippingAddressForQuote?.state?.trim() && shippingAddressForQuote?.country?.trim());
   const taxRate = Math.max(0, Number(policies?.gst?.rate ?? 0));
   const tax = taxableSubtotal * taxRate / 100;
   const giftCardApplied = Math.min(giftCardBalance, taxableSubtotal + shipping + tax);
@@ -308,8 +311,14 @@ function CheckoutContent() {
 
   useEffect(() => {
     const address = selectedAddress || guestAddress;
-    if (!address?.country) { setShippingQuote(null); return; }
+    if (!address?.country?.trim() || !address?.state?.trim()) {
+      setShippingQuote(null);
+      setIsShippingQuoteLoading(false);
+      return;
+    }
+    let cancelled = false;
     const timer = setTimeout(async () => {
+      setIsShippingQuoteLoading(true);
       try {
         const response = await fetch('/api/shipping/quote', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -318,10 +327,15 @@ function CheckoutContent() {
             items: items.map(item => ({ productId: item.productId, quantity: item.quantity }))
           })
         });
-        setShippingQuote(response.ok ? await response.json() : null);
-      } catch { setShippingQuote(null); }
+        const quote = response.ok ? await response.json() : null;
+        if (!cancelled) setShippingQuote(quote);
+      } catch {
+        if (!cancelled) setShippingQuote(null);
+      } finally {
+        if (!cancelled) setIsShippingQuoteLoading(false);
+      }
     }, 150);
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [selectedAddress, guestAddress, taxableSubtotal, items]);
 
   useEffect(() => {
@@ -348,6 +362,15 @@ function CheckoutContent() {
       toast({
         title: "Address Required",
         description: "Please select or enter a shipping address.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const destinationAddress = selectedAddress || guestAddress;
+    if (!destinationAddress?.state?.trim() || !destinationAddress?.country?.trim()) {
+      toast({
+        title: "Delivery State Required",
+        description: "Please select or enter a delivery address with a state so the correct shipping charge can be calculated.",
         variant: "destructive",
       });
       return;
@@ -769,7 +792,6 @@ function CheckoutContent() {
                 <div className="space-y-3 border rounded-lg p-3">
                   <div className="flex gap-2"><Input value={giftCardCode} onChange={e=>setGiftCardCode(e.target.value.toUpperCase())} placeholder="Gift card code"/><Button type="button" variant="outline" onClick={applyGiftCard}>Apply Gift Card</Button></div>
                   {giftCardApplied > 0 && <p className="text-xs text-green-600">Gift card applied: ₹{giftCardApplied.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</p>}
-                  {user && loyaltyBalance > 0 && <div className="flex items-center justify-between gap-3 text-sm"><span>Rewards: {loyaltyBalance} points available (100 points = ₹10)</span><Input className="w-28" type="number" min="0" max={loyaltyBalance} step="10" value={loyaltyPointsRedeemed} onChange={e=>setLoyaltyPointsRedeemed(Math.min(loyaltyBalance, Math.max(0, Number(e.target.value)||0)))} /></div>}
                 </div>
 
                 {/* Payment Method */}
@@ -788,12 +810,11 @@ function CheckoutContent() {
                     <span>Subtotal</span>
                     <span data-testid="text-subtotal">₹{subtotal.toLocaleString()}</span>
                   </div>
-                  {discount > 0 && <div className="flex justify-between text-green-600"><span>{appliedPromo?.code ? `Discount (${appliedPromo.code})` : `Automatic discount (${globalDiscountPercent}% off)`}</span><span>-₹{discount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
-                  {loyaltyDiscount > 0 && <div className="flex justify-between text-green-600"><span>Rewards</span><span>-₹{loyaltyDiscount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
+                  {discount > 0 && <div className="flex justify-between text-green-600"><span>"Discount"</span><span>-₹{discount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
                   {giftCardApplied > 0 && <div className="flex justify-between text-green-600"><span>Gift card</span><span>-₹{giftCardApplied.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span></div>}
                   <div className="flex justify-between">
                     <span>Shipping</span>
-                    <span className={shipping === 0 ? "text-amber-600" : ""} data-testid="text-shipping">{shipping === 0 ? "Free" : `₹${shipping.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}</span>
+                    <span className={shipping === 0 ? "text-muted-foreground" : ""} data-testid="text-shipping">{!hasValidShippingState ? "Select delivery state" : isShippingQuoteLoading ? "Calculating…" : shippingQuote ? (shipping === 0 ? "Free" : `₹${shipping.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`) : "Unable to calculate"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>GST ({taxRate}%)</span>
@@ -1037,7 +1058,7 @@ function CheckoutContent() {
                   onClick={form.handleSubmit(onSubmit)}
                   size="lg" 
                   className="w-full"
-                  disabled={isSubmitting || (!selectedAddress && !guestAddress) || (orderSettings?.onlinePaymentEnabled === false && !orderSettings?.codEnabled)}
+                  disabled={isSubmitting || !hasValidShippingState || (!selectedAddress && !guestAddress) || (orderSettings?.onlinePaymentEnabled === false && !orderSettings?.codEnabled)}
                   data-testid="button-place-order"
                 >
                   {isSubmitting ? "Processing..." : paymentMethod === "cod" ? `Place COD Order · ₹${total.toLocaleString("en-IN")}` : `Pay ₹${total.toLocaleString("en-IN")} with Razorpay`}

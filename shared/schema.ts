@@ -219,6 +219,9 @@ export const productReviews = pgTable("product_reviews", {
   images: text("images").array().default([]), // Review photos
   isVerifiedPurchase: boolean("is_verified_purchase").default(false),
   helpfulVotes: integer("helpful_votes").default(0),
+  // Reviews are moderated by administrators before appearing publicly.
+  isApproved: boolean("is_approved").notNull().default(true),
+  isFlagged: boolean("is_flagged").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [

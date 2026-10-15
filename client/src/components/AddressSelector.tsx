@@ -72,6 +72,15 @@ const addressSchema = z.object({
 
 type AddressFormData = z.infer<typeof addressSchema>;
 
+const INDIAN_STATES = [
+  "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana",
+  "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur",
+  "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana",
+  "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal", "Andaman and Nicobar Islands", "Chandigarh",
+  "Dadra and Nagar Haveli and Daman and Diu", "Delhi", "Jammu and Kashmir", "Ladakh", "Lakshadweep", "Puducherry"
+];
+
+
 interface AddressSelectorProps {
   selectedAddressId?: string;
   onAddressSelect: (address: UserAddress | null) => void;
@@ -208,17 +217,7 @@ export default function AddressSelector({
     },
   });
 
-  // Auto-select default address when addresses are loaded
-  useEffect(() => {
-    if (!isLoading && addresses.length > 0 && user && !selectedAddressId && !useGuestAddress) {
-      const defaultAddress = addresses.find(addr => addr.isDefault);
-      const addressToSelect = defaultAddress || addresses[0]; // Fall back to first address if no default
-      
-      if (addressToSelect) {
-        onAddressSelect(addressToSelect);
-      }
-    }
-  }, [addresses, isLoading, user, selectedAddressId, useGuestAddress, onAddressSelect]);
+  // Require an explicit address selection so state-based shipping is calculated for the address the customer chooses.
 
   const onSubmit = (data: AddressFormData) => {
     if (editingAddress) {
@@ -317,8 +316,7 @@ export default function AddressSelector({
     );
   }
 
-  const defaultAddress = addresses.find(addr => addr.isDefault);
-  const initialSelectedId = selectedAddressId || defaultAddress?.id || '';
+  const initialSelectedId = selectedAddressId || '';
 
   return (
     <>
@@ -561,17 +559,19 @@ export default function AddressSelector({
                             render={({ field }) => (
                               <FormItem>
                                 <FormLabel>State</FormLabel>
-                                <FormControl>
-                                  <Input 
-                                    placeholder="State" 
-                                    {...field}
-                                    onChange={(e) => {
-                                      field.onChange(e);
-                                      handleGuestFormChange();
-                                    }}
-                                    data-testid="input-guest-state"
-                                  />
-                                </FormControl>
+                                <Select value={field.value} onValueChange={(value) => {
+                                  field.onChange(value);
+                                  handleGuestFormChange();
+                                }}>
+                                  <FormControl>
+                                    <SelectTrigger data-testid="input-guest-state">
+                                      <SelectValue placeholder="Select state" />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    {INDIAN_STATES.map((state) => <SelectItem key={state} value={state}>{state}</SelectItem>)}
+                                  </SelectContent>
+                                </Select>
                                 <FormMessage />
                               </FormItem>
                             )}
@@ -781,13 +781,16 @@ export default function AddressSelector({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>State</FormLabel>
-                        <FormControl>
-                          <Input 
-                            placeholder="State" 
-                            {...field} 
-                            data-testid="input-new-state"
-                          />
-                        </FormControl>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger data-testid="input-new-state">
+                              <SelectValue placeholder="Select state" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {INDIAN_STATES.map((state) => <SelectItem key={state} value={state}>{state}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}

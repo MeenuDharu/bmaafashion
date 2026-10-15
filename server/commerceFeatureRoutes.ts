@@ -124,8 +124,11 @@ export function registerCommerceFeatureRoutes(app: Express) {
   app.post("/api/shipping/quote", async (req: Request, res: Response) => {
     try {
       const { country, state, subtotal = 0, items = [] } = req.body || {};
-      const countryName = String(country || "India").trim();
+      const countryName = String(country || "").trim();
       const stateName = String(state || "").trim();
+      if (!countryName || !stateName) {
+        return res.status(400).json({ error: "A delivery country and state are required to calculate shipping." });
+      }
       const itemList = Array.isArray(items) ? items : [];
       const rules = await db.select().from(shippingRules).where(eq(shippingRules.active, true)).orderBy(asc(shippingRules.priority));
       const normalizedCountry = countryName.toLowerCase();
@@ -138,10 +141,10 @@ export function registerCommerceFeatureRoutes(app: Express) {
         })
         // A state-specific rule must win over a country-wide rule, regardless of priority.
         .sort((a, b) => Number(Boolean(b.state?.trim())) - Number(Boolean(a.state?.trim())) || Number(a.priority || 0) - Number(b.priority || 0))[0];
-      const siteConfig = (await db.select().from(siteSettings).where(eq(siteSettings.id, 1)).limit(1))[0];
-      const policy = siteConfig?.policies?.shipping || {};
-      const chargePerGroup = matching ? Number(matching.shippingCharge || 0) : Math.max(0, Number(policy.shippingCost || 60));
-      const freeThreshold = matching?.freeShippingThreshold != null ? Number(matching.freeShippingThreshold) : Math.max(0, Number(policy.freeThreshold || 0));
+      // Shipping configuration is managed in Admin → Commerce Features → Delivery.
+      // The ₹60 default is used only when no destination rule exists.
+      const chargePerGroup = matching ? Number(matching.shippingCharge || 0) : 60;
+      const freeThreshold = matching?.freeShippingThreshold != null ? Number(matching.freeShippingThreshold) : 0;
       const merchandiseSubtotal = Math.max(0, Number(subtotal || 0));
       const totalQuantity = itemList.reduce((sum: number, item: any) => sum + Math.max(0, Math.floor(Number(item.quantity || 0))), 0);
       const normalShipping = freeThreshold > 0 && merchandiseSubtotal >= freeThreshold ? 0 : (totalQuantity > 0 ? Math.ceil(totalQuantity / 2) * Math.max(0, chargePerGroup) : 0);

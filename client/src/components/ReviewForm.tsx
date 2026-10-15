@@ -66,7 +66,7 @@ export function ReviewForm({
         
         toast({
           title: "Review Submitted",
-          description: "Thank you for your review! It has been submitted successfully",
+          description: "Thank you for your review! It will appear on the product page after admin approval.",
         });
       }
       
@@ -157,11 +157,12 @@ export function ReviewForm({
               name="review"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Your Review *</FormLabel>
+                  <FormLabel>Comments / Your Review *</FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder="Share your experience with this product..."
-                      className="min-h-[100px]"
+                      placeholder="Write your comments about the product, quality, fit, delivery, and overall experience (at least 10 characters)..."
+                      className="min-h-[160px] resize-y"
+                      rows={6}
                       {...field}
                       data-testid="review-input"
                     />

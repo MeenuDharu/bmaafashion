@@ -399,6 +399,11 @@ function OrderHistoryContent() {
                           Subtotal: ₹{parseFloat(order.subtotal).toLocaleString()}
                         </p>
                       )}
+                      {Number(order.couponDiscount || 0) > 0 && (
+                        <p className="text-xs text-green-600">
+                          Discount{Number(order.subtotal) > 0 ? ` (${((Number(order.couponDiscount || 0) / Number(order.subtotal)) * 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}%)` : ""}: -₹{Number(order.couponDiscount || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                        </p>
+                      )}
                     </div>
                   </div>
 

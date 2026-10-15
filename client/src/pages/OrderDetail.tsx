@@ -704,6 +704,20 @@ function OrderDetailContent() {
                   </div>
                 )}
                 
+                {Number(orderData.couponDiscount || 0) > 0 && (
+                  <div className="flex justify-between text-sm text-green-600">
+                    <span>Discount{Number(orderData.subtotal) > 0 ? ` (${((Number(orderData.couponDiscount || 0) / Number(orderData.subtotal)) * 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}%)` : ""}</span>
+                    <span data-testid="text-discount">-₹{Number(orderData.couponDiscount || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+
+                {orderData.giftCardDiscount && Number(orderData.giftCardDiscount) > 0 && (
+                  <div className="flex justify-between text-sm text-green-600">
+                    <span>Gift card</span>
+                    <span>-₹{Number(orderData.giftCardDiscount).toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+
                 {orderData.shippingCost && parseFloat(orderData.shippingCost) > 0 && (
                   <div className="flex justify-between text-sm">
                     <span>Shipping</span>

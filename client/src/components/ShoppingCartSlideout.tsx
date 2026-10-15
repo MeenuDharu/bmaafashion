@@ -42,9 +42,8 @@ export default function ShoppingCartSlideout({
   const activeDiscountLabel = activeCoupon ? `Discount (${activeCoupon.code})` : `Automatic discount (${globalDiscountPercent}% off)`;
   const discountedSubtotal = Math.max(0, originalSubtotal - automaticGlobalDiscount);
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
-  const freeThreshold = Math.max(0, Number(policies?.shipping?.freeThreshold ?? 0));
-  const configuredShipping = Math.max(0, Number(policies?.shipping?.shippingCost ?? 0));
-  const shipping = freeThreshold > 0 && discountedSubtotal >= freeThreshold ? 0 : configuredShipping;
+  // Destination state is not selected in the cart drawer; shipping is calculated at checkout.
+  const shipping = 0;
   const taxRate = Math.max(0, Number(policies?.gst?.rate ?? 0));
   const tax = discountedSubtotal * taxRate / 100;
   const total = discountedSubtotal + shipping + tax;
@@ -165,7 +164,7 @@ export default function ShoppingCartSlideout({
                 {automaticGlobalDiscount > 0 && <div className="flex justify-between text-sm"><span>Offer subtotal</span><span>₹{discountedSubtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></div>}
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Shipping</span>
-                  <span className={shipping === 0 ? "text-amber-600" : ""} data-testid="text-shipping">{shipping === 0 ? "Free" : `₹${shipping.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}</span>
+                  <span className="text-muted-foreground" data-testid="text-shipping">Calculated at checkout</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">GST ({taxRate}%)</span>

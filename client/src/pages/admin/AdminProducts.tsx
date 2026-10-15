@@ -128,6 +128,7 @@ function AdminProductsContent() {
   const [previousCreateCategory, setPreviousCreateCategory] = useState("");
   const [uploadingImages, setUploadingImages] = useState(false);
   const [uploadingEditImages, setUploadingEditImages] = useState(false);
+  const [editStockError, setEditStockError] = useState<string | null>(null);
   
   const { toast } = useToast();
   const authenticatedFetch = useAuthenticatedFetch();
@@ -338,7 +339,10 @@ function AdminProductsContent() {
         method: 'PUT',
         body: JSON.stringify(productData),
       });
-      if (!response.ok) throw new Error('Failed to update product');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.details || errorData.error || 'Failed to update product');
+      }
       return response.json();
     },
     onSuccess: () => {
@@ -350,8 +354,8 @@ function AdminProductsContent() {
       toast({ title: "Product updated successfully" });
       editForm.reset();
     },
-    onError: () => {
-      toast({ title: "Failed to update product", variant: "destructive" });
+    onError: (error) => {
+      toast({ title: "Failed to update product", description: error instanceof Error ? error.message : undefined, variant: "destructive" });
     }
   });
 
@@ -407,13 +411,46 @@ function AdminProductsContent() {
     createProductMutation.mutate(data);
   };
 
-  const onEditSubmit = (data: ProductFormValues) => {
-    if (editingProduct) {
+  const onEditSubmit = async (data: ProductFormValues) => {
+    if (!editingProduct) return;
+    setEditStockError(null);
+
+    // Keep parent product stock in sync with variant stock. Do not silently
+    // overwrite either value: explain the mismatch and let the admin correct it.
+    try {
+      const variantsResponse = await authenticatedFetch(`/api/products/${editingProduct.id}/variants`);
+      if (!variantsResponse.ok) {
+        throw new Error('Could not verify variant stock. Please try again.');
+      }
+      const variants = await variantsResponse.json();
+      if (Array.isArray(variants) && variants.length > 0) {
+        const variantTotal = variants.reduce(
+          (total: number, variant: { stockQuantity?: number | string }) =>
+            total + Math.max(0, Number(variant.stockQuantity) || 0),
+          0,
+        );
+        const productStock = Math.max(0, Number(data.inStock) || 0);
+        if (productStock !== variantTotal) {
+          const message = `Stock quantity mismatch: Product stock is ${productStock}, but variant stock totals ${variantTotal}. Change Stock Quantity to ${variantTotal}, or use Manage Variants to adjust variant quantities so their total equals ${productStock}.`;
+          setEditStockError(message);
+          toast({ title: 'Stock quantity mismatch', description: message, variant: 'destructive' });
+          return;
+        }
+      }
       updateProductMutation.mutate({ id: editingProduct.id, data });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Please try again.';
+      setEditStockError(message);
+      toast({
+        title: 'Unable to validate variant stock',
+        description: message,
+        variant: 'destructive',
+      });
     }
   };
 
   const handleEdit = (product: Product) => {
+    setEditStockError(null);
     setEditingProduct(product);
     setIsEditingNewCategory(false);
     editForm.reset({
@@ -727,6 +764,27 @@ function AdminProductsContent() {
                     </FormItem>
                   )}
                 />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-lg border p-4">
+                  <div className="md:col-span-2">
+                    <h3 className="font-semibold">Product Page Content</h3>
+                    <p className="text-sm text-muted-foreground">These fields appear dynamically in Specifications and Product Details on the customer product page.</p>
+                  </div>
+                  <FormField control={createForm.control} name="specifications" render={({ field }) => (
+                    <FormItem className="md:col-span-2"><FormLabel>Specifications (one item per line)</FormLabel><FormControl><Textarea rows={5} placeholder={'Material: Cotton Blend\nSleeve: Short Sleeve\nFit: Regular'} {...field} /></FormControl><FormMessage /></FormItem>
+                  )} />
+                  <FormField control={createForm.control} name="dimensions" render={({ field }) => (
+                    <FormItem><FormLabel>Dimensions / Size Details</FormLabel><FormControl><Input placeholder="e.g. Length 42 inches" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>
+                  )} />
+                  <FormField control={createForm.control} name="structureMaterial" render={({ field }) => (
+                    <FormItem><FormLabel>Material / Construction</FormLabel><FormControl><Input placeholder="e.g. Premium cotton" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>
+                  )} />
+                  <FormField control={createForm.control} name="cultivableCrops" render={({ field }) => (
+                    <FormItem><FormLabel>Additional Product Detail</FormLabel><FormControl><Input placeholder="e.g. Occasion: Daily Wear" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>
+                  )} />
+                  <FormField control={createForm.control} name="planterCount" render={({ field }) => (
+                    <FormItem><FormLabel>Capacity / Count (optional)</FormLabel><FormControl><Input type="number" min="0" placeholder="Optional" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>
+                  )} />
+                </div>
                 <FormField
                   control={createForm.control}
                   name="images"
@@ -1145,9 +1203,23 @@ function AdminProductsContent() {
                     <FormItem>
                       <FormLabel>Stock Quantity</FormLabel>
                       <FormControl>
-                        <Input type="number" {...field} />
+                        <Input
+                          type="number"
+                          {...field}
+                          onChange={(event) => {
+                            field.onChange(event);
+                            if (editStockError) setEditStockError(null);
+                          }}
+                          aria-invalid={Boolean(editStockError)}
+                        />
                       </FormControl>
                       <FormMessage />
+                      {editStockError && (
+                        <div role="alert" className="mt-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+                          <p className="font-semibold">Stock quantity error</p>
+                          <p>{editStockError}</p>
+                        </div>
+                      )}
                     </FormItem>
                   )}
                 />
@@ -1165,6 +1237,27 @@ function AdminProductsContent() {
                   </FormItem>
                 )}
               />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-lg border p-4">
+                <div className="md:col-span-2">
+                  <h3 className="font-semibold">Product Page Content</h3>
+                  <p className="text-sm text-muted-foreground">These fields appear dynamically in Specifications and Product Details on the customer product page.</p>
+                </div>
+                <FormField control={editForm.control} name="specifications" render={({ field }) => (
+                  <FormItem className="md:col-span-2"><FormLabel>Specifications (one item per line)</FormLabel><FormControl><Textarea rows={5} placeholder={'Material: Cotton Blend\nSleeve: Short Sleeve\nFit: Regular'} {...field} /></FormControl><FormMessage /></FormItem>
+                )} />
+                <FormField control={editForm.control} name="dimensions" render={({ field }) => (
+                  <FormItem><FormLabel>Dimensions / Size Details</FormLabel><FormControl><Input placeholder="e.g. Length 42 inches" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>
+                )} />
+                <FormField control={editForm.control} name="structureMaterial" render={({ field }) => (
+                  <FormItem><FormLabel>Material / Construction</FormLabel><FormControl><Input placeholder="e.g. Premium cotton" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>
+                )} />
+                <FormField control={editForm.control} name="cultivableCrops" render={({ field }) => (
+                  <FormItem><FormLabel>Additional Product Detail</FormLabel><FormControl><Input placeholder="e.g. Occasion: Daily Wear" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>
+                )} />
+                <FormField control={editForm.control} name="planterCount" render={({ field }) => (
+                  <FormItem><FormLabel>Capacity / Count (optional)</FormLabel><FormControl><Input type="number" min="0" placeholder="Optional" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>
+                )} />
+              </div>
               <FormField
                 control={editForm.control}
                 name="images"

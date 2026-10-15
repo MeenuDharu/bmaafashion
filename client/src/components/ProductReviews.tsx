@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -51,6 +51,22 @@ export function ProductReviews({ productId, currentUserId, currentUserRole }: Pr
     },
   });
 
+  // Fetch the signed-in customer's own review, including reviews pending moderation.
+  const { data: myReviewData } = useQuery({
+    queryKey: ['/api/products', productId, 'my-review', currentUserId],
+    enabled: !!currentUserId,
+    queryFn: async () => {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`/api/products/${productId}/my-review`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      });
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error('Failed to fetch your review');
+      return response.json();
+    },
+  });
+
   // Fetch rating summary
   const { 
     data: ratingData, 
@@ -75,6 +91,9 @@ export function ProductReviews({ productId, currentUserId, currentUserRole }: Pr
     });
     queryClient.invalidateQueries({ 
       queryKey: ['/api/products', productId, 'rating'] 
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['/api/products', productId, 'my-review', currentUserId]
     });
   };
 
@@ -111,11 +130,21 @@ export function ProductReviews({ productId, currentUserId, currentUserRole }: Pr
   };
 
   // Check if user has already reviewed this product
-  const userHasReviewed = reviewsData?.reviews?.some(
+  const userHasReviewed = !!myReviewData || !!reviewsData?.reviews?.some(
     (review: any) => review.userId === currentUserId
   );
 
   const canWriteReview = currentUserId && !userHasReviewed && !showReviewForm;
+
+  // Keep the rating and comment fields visible for signed-in customers who can review.
+  // Open automatically only once, and include pending reviews in the duplicate check.
+  const autoOpenedReviewForm = useRef(false);
+  useEffect(() => {
+    if (currentUserId && reviewsData && myReviewData !== undefined && !userHasReviewed && !editingReview && !autoOpenedReviewForm.current) {
+      autoOpenedReviewForm.current = true;
+      setShowReviewForm(true);
+    }
+  }, [currentUserId, reviewsData, myReviewData, userHasReviewed, editingReview]);
 
   if (reviewsError || ratingError) {
     return (

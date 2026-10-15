@@ -89,11 +89,11 @@ const adminMenuItems = [
   //   url: "/admin/exports",
   //   icon: Download,
   // },
-  // {
-  //   title: "Reviews",
-  //   url: "/admin/reviews",
-  //   icon: MessageCircle,
-  // },
+  {
+    title: "Reviews",
+    url: "/admin/reviews",
+    icon: MessageCircle,
+  },
 ];
 
 const communicationMenuItems = [

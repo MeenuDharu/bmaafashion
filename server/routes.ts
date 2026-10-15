@@ -16,8 +16,8 @@ import multer from "multer";
 import fs from 'fs';
 import sharp from 'sharp';
 import { db } from "./db";
-import { eq, and, sql } from "drizzle-orm";
-import { productVariants, products } from "@shared/schema";
+import { eq, and, sql, desc } from "drizzle-orm";
+import { productVariants, products, productReviews, users } from "@shared/schema";
 import {
   insertProductSchema,
   insertCategorySchema,
@@ -1666,14 +1666,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         body: JSON.stringify(req.body, null, 2)
       });
       const validatedData = insertProductSchema.parse(req.body);
-      // Variant quantities are the source of truth when a product has variants.
-      // Ignore a conflicting parent stock value so product stock cannot drift.
+      // Enforce matching product and variant stock on the server too, so an
+      // API call cannot bypass the admin form's stock validation.
       const existingVariants = await db.select({ stockQuantity: productVariants.stockQuantity })
         .from(productVariants).where(eq(productVariants.productId, id));
       if (existingVariants.length > 0) {
-        validatedData.inStock = existingVariants.reduce(
+        const variantTotal = existingVariants.reduce(
           (total, variant) => total + Math.max(0, Number(variant.stockQuantity) || 0), 0
         );
+        const productStock = Math.max(0, Number(validatedData.inStock) || 0);
+        if (productStock !== variantTotal) {
+          return res.status(400).json({
+            error: 'Stock quantity mismatch',
+            details: `Product stock is ${productStock}, but variant stock totals ${variantTotal}. Update the product stock quantity or adjust variant quantities so both totals match.`,
+            productStock,
+            variantTotal,
+          });
+        }
       }
       console.log('✅ Validation passed, updating product...');
       const product = await storage.updateProduct(id, validatedData);
@@ -2823,7 +2832,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const gstin = process.env.BUSINESS_GSTIN || 'GSTIN not configured';
       const businessAddress = process.env.BUSINESS_ADDRESS || 'Business address not configured';
       const itemRows = (order.items || []).map((item: any) => `<tr><td>${escapeHtml(item.productName)}</td><td>${escapeHtml(item.size || '-')}</td><td>${escapeHtml(item.color || '-')}</td><td>${item.quantity}</td><td>₹${Number(item.productPrice).toFixed(2)}</td><td>₹${Number(item.totalPrice).toFixed(2)}</td></tr>`).join('');
-      const invoiceHTML = `<!doctype html><html><head><meta charset="utf-8"><title>${invoiceNumber}</title><style>body{font-family:Arial,sans-serif;margin:0;padding:32px;color:#222}.invoice{max-width:900px;margin:auto}.top{display:flex;justify-content:space-between;border-bottom:2px solid #222;padding-bottom:16px}.muted{color:#666;font-size:12px}table{width:100%;border-collapse:collapse;margin-top:24px}th,td{border:1px solid #ddd;padding:9px;text-align:left;font-size:12px}th{background:#f5f5f5}.totals{margin-left:auto;margin-top:20px;width:320px}.row{display:flex;justify-content:space-between;padding:5px}.grand{font-size:18px;font-weight:bold;border-top:2px solid #222;margin-top:5px;padding-top:8px}@media print{body{padding:0}.print{display:none}}</style></head><body><div class="invoice"><div class="top"><div><h1>${escapeHtml(businessName)}</h1><div class="muted">${escapeHtml(businessAddress)}</div><div class="muted">GSTIN: ${escapeHtml(gstin)}</div></div><div><h2>TAX INVOICE</h2><div>Invoice: ${escapeHtml(invoiceNumber)}</div><div>Date: ${new Date(order.createdAt || Date.now()).toLocaleDateString('en-IN')}</div><div>Order: ${escapeHtml(order.id)}</div></div></div><h3>Bill To / Ship To</h3><div class="muted">${escapeHtml(order.customerName)}<br>${escapeHtml(order.customerEmail)}<br>${escapeHtml(order.shippingAddress)}</div><table><thead><tr><th>Product</th><th>Size</th><th>Color</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr></thead><tbody>${itemRows}</tbody></table><div class="totals"><div class="row"><span>Subtotal</span><span>₹${Number(order.subtotal).toFixed(2)}</span></div><div class="row"><span>Shipping</span><span>₹${Number(order.shippingCost || 0).toFixed(2)}</span></div><div class="row"><span>GST / Tax</span><span>₹${Number(order.taxAmount || 0).toFixed(2)}</span></div><div class="row grand"><span>Total</span><span>₹${Number(order.total).toFixed(2)}</span></div></div><p class="muted">Payment status: ${escapeHtml(order.paymentStatus || 'pending')} · Payment method: ${escapeHtml(order.paymentMethod || '-')}</p><button class="print" onclick="window.print()">Print / Save as PDF</button></div></body></html>`;
+      const invoiceHTML = `<!doctype html><html><head><meta charset="utf-8"><title>${invoiceNumber}</title><style>body{font-family:Arial,sans-serif;margin:0;padding:32px;color:#222}.invoice{max-width:900px;margin:auto}.top{display:flex;justify-content:space-between;border-bottom:2px solid #222;padding-bottom:16px}.muted{color:#666;font-size:12px}table{width:100%;border-collapse:collapse;margin-top:24px}th,td{border:1px solid #ddd;padding:9px;text-align:left;font-size:12px}th{background:#f5f5f5}.totals{margin-left:auto;margin-top:20px;width:320px}.row{display:flex;justify-content:space-between;padding:5px}.grand{font-size:18px;font-weight:bold;border-top:2px solid #222;margin-top:5px;padding-top:8px}@media print{body{padding:0}.print{display:none}}</style></head><body><div class="invoice"><div class="top"><div><h1>${escapeHtml(businessName)}</h1><div class="muted">${escapeHtml(businessAddress)}</div><div class="muted">GSTIN: ${escapeHtml(gstin)}</div></div><div><h2>TAX INVOICE</h2><div>Invoice: ${escapeHtml(invoiceNumber)}</div><div>Date: ${new Date(order.createdAt || Date.now()).toLocaleDateString('en-IN')}</div><div>Order: ${escapeHtml(order.id)}</div></div></div><h3>Bill To / Ship To</h3><div class="muted">${escapeHtml(order.customerName)}<br>${escapeHtml(order.customerEmail)}<br>${escapeHtml(order.shippingAddress)}</div><table><thead><tr><th>Product</th><th>Size</th><th>Color</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr></thead><tbody>${itemRows}</tbody></table><div class="totals"><div class="row"><span>Subtotal</span><span>₹${Number(order.subtotal).toFixed(2)}</span></div>${Number(order.couponDiscount || 0) > 0 ? `<div class="row" style="color:#16803c"><span>Discount${Number(order.subtotal) > 0 ? ` (${((Number(order.couponDiscount || 0) / Number(order.subtotal)) * 100).toFixed(2).replace(/\.00$/, "")}% )`.replace("% )", "%)") : ""}</span><span>-₹${Number(order.couponDiscount || 0).toFixed(2)}</span></div>` : ""}<div class="row"><span>Shipping</span><span>₹${Number(order.shippingCost || 0).toFixed(2)}</span></div><div class="row"><span>GST / Tax</span><span>₹${Number(order.taxAmount || 0).toFixed(2)}</span></div><div class="row grand"><span>Total</span><span>₹${Number(order.total).toFixed(2)}</span></div></div><p class="muted">Payment status: ${escapeHtml(order.paymentStatus || 'pending')} · Payment method: ${escapeHtml(order.paymentMethod || '-')}</p><button class="print" onclick="window.print()">Print / Save as PDF</button></div></body></html>`;
       res.type('html').send(invoiceHTML);
     } catch (error) { console.error('Invoice generation failed:', error); res.status(500).json({ error: 'Failed to generate invoice' }); }
   });
@@ -2932,6 +2941,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         <span>Subtotal:</span>
         <span>₹${Number(order.subtotal).toFixed(2)}</span>
       </div>
+      ${Number(order.couponDiscount || 0) > 0 ? `<div class="total-row" style="color:#16803c"><span>Discount${Number(order.subtotal) > 0 ? ` (${((Number(order.couponDiscount || 0) / Number(order.subtotal)) * 100).toFixed(2).replace(/\.00$/, "")}% )`.replace("% )", "%)") : ""}:</span><span>-₹${Number(order.couponDiscount || 0).toFixed(2)}</span></div>` : ""}
       <div class="total-row">
         <span>Shipping:</span>
         <span>FREE</span>
@@ -3485,7 +3495,170 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin review moderation endpoints
+  app.get('/api/admin/reviews/stats', [authenticateToken, requireAdmin], async (_req: Request, res: Response) => {
+    try {
+      const allReviews = await db.select().from(productReviews);
+      const visibleReviews = allReviews.filter(review => review.isApproved !== false && review.isFlagged !== true);
+      const recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const ratingDistribution = {
+        1: visibleReviews.filter(review => review.rating === 1).length,
+        2: visibleReviews.filter(review => review.rating === 2).length,
+        3: visibleReviews.filter(review => review.rating === 3).length,
+        4: visibleReviews.filter(review => review.rating === 4).length,
+        5: visibleReviews.filter(review => review.rating === 5).length,
+      };
+      return res.json({
+        totalReviews: allReviews.length,
+        averageRating: visibleReviews.length ? visibleReviews.reduce((sum, review) => sum + review.rating, 0) / visibleReviews.length : 0,
+        pendingModeration: allReviews.filter(review => review.isApproved === false).length,
+        flaggedReviews: allReviews.filter(review => review.isFlagged === true).length,
+        recentReviews: allReviews.filter(review => review.createdAt && new Date(review.createdAt).getTime() >= recentCutoff).length,
+        ratingDistribution,
+      });
+    } catch (error) {
+      console.error('Admin review stats failed:', error);
+      return res.status(500).json({ error: 'Failed to fetch review statistics' });
+    }
+  });
+
+  app.get('/api/admin/reviews', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    try {
+      const page = Math.max(1, Number.parseInt(String(req.query.page || '1'), 10) || 1);
+      const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || '20'), 10) || 20));
+      const status = String(req.query.status || 'all');
+      const rating = String(req.query.rating || 'all');
+      const search = String(req.query.search || '').trim().toLowerCase();
+      const rows = await db.select().from(productReviews).orderBy(desc(productReviews.createdAt));
+      const enriched = await Promise.all(rows.map(async review => {
+        const [user, product] = await Promise.all([
+          storage.getUser(review.userId),
+          storage.getProduct(review.productId),
+        ]);
+        return {
+          ...review,
+          user: user ? { id: user.id, firstName: user.firstName, lastName: user.lastName, profileImageUrl: user.profileImageUrl, email: user.email } : null,
+          product: product ? { id: product.id, name: product.name, images: product.images } : null,
+        };
+      }));
+      const filtered = enriched.filter(review => {
+        const currentStatus = review.isFlagged ? 'flagged' : review.isApproved ? 'approved' : 'pending';
+        if (status !== 'all' && currentStatus !== status) return false;
+        if (rating !== 'all' && review.rating !== Number(rating)) return false;
+        if (search) {
+          const haystack = [review.title, review.review, review.product?.name, review.user?.firstName, review.user?.lastName, review.user?.email].filter(Boolean).join(' ').toLowerCase();
+          if (!haystack.includes(search)) return false;
+        }
+        return true;
+      });
+      const start = (page - 1) * limit;
+      return res.json({
+        reviews: filtered.slice(start, start + limit),
+        pagination: { page, limit, total: filtered.length, pages: Math.max(1, Math.ceil(filtered.length / limit)) },
+      });
+    } catch (error) {
+      console.error('Admin review list failed:', error);
+      return res.status(500).json({ error: 'Failed to fetch reviews' });
+    }
+  });
+
+  app.put('/api/admin/reviews/:id/approve', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    try {
+      const review = await storage.getReviewById(req.params.id);
+      if (!review) return res.status(404).json({ error: 'Review not found' });
+      const approved = req.body?.approved !== false;
+      const updated = await storage.updateReview(review.id, { isApproved: approved, ...(approved ? { isFlagged: false } : {}) });
+      return res.json(updated);
+    } catch (error) {
+      console.error('Admin review approval failed:', error);
+      return res.status(500).json({ error: 'Failed to update review approval' });
+    }
+  });
+
+  app.put('/api/admin/reviews/:id/flag', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    try {
+      const review = await storage.getReviewById(req.params.id);
+      if (!review) return res.status(404).json({ error: 'Review not found' });
+      const flagged = req.body?.flagged === true;
+      const updated = await storage.updateReview(review.id, { isFlagged: flagged, ...(flagged ? { isApproved: false } : {}) });
+      return res.json(updated);
+    } catch (error) {
+      console.error('Admin review flag failed:', error);
+      return res.status(500).json({ error: 'Failed to update review flag' });
+    }
+  });
+
+  app.delete('/api/admin/reviews/:id', [authenticateToken, requireAdmin], async (req: Request, res: Response) => {
+    try {
+      const review = await storage.getReviewById(req.params.id);
+      if (!review) return res.status(404).json({ error: 'Review not found' });
+      await storage.deleteReview(review.id);
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('Admin review deletion failed:', error);
+      return res.status(500).json({ error: 'Failed to delete review' });
+    }
+  });
+
   // Review Routes
+  // Get the signed-in customer's own review, including pending moderation.
+  app.get('/api/products/:id/my-review', authenticateToken, async (req, res) => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const productId = req.params.id;
+      const product = await storage.getProduct(productId);
+      if (!product) return res.status(404).json({ error: 'Product not found' });
+      const reviews = await storage.getProductReviews(productId);
+      const review = reviews.find(item => item.userId === authReq.user.id);
+      if (!review) return res.status(404).json({ error: 'Review not found' });
+      return res.json(review);
+    } catch (error) {
+      console.error('Error fetching customer review:', error);
+      return res.status(500).json({ error: 'Failed to fetch your review' });
+    }
+  });
+
+  // Public homepage testimonials: only approved, non-flagged customer product reviews.
+  app.get('/api/testimonials', async (_req: Request, res: Response) => {
+    try {
+      const rows = await db
+        .select({
+          id: productReviews.id,
+          rating: productReviews.rating,
+          review: productReviews.review,
+          title: productReviews.title,
+          createdAt: productReviews.createdAt,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          profileImageUrl: users.profileImageUrl,
+          productName: products.name,
+        })
+        .from(productReviews)
+        .innerJoin(users, eq(productReviews.userId, users.id))
+        .innerJoin(products, eq(productReviews.productId, products.id))
+        .where(and(eq(productReviews.isApproved, true), eq(productReviews.isFlagged, false)))
+        .orderBy(desc(productReviews.createdAt))
+        .limit(12);
+
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(rows
+        .filter((row) => typeof row.review === 'string' && row.review.trim().length > 0)
+        .map((row) => ({
+          id: row.id,
+          rating: row.rating,
+          review: row.review,
+          title: row.title,
+          createdAt: row.createdAt,
+          name: [row.firstName, row.lastName].filter(Boolean).join(' ').trim() || 'Verified customer',
+          profileImageUrl: row.profileImageUrl,
+          productName: row.productName,
+        })));
+    } catch (error) {
+      console.error('Error fetching homepage testimonials:', error);
+      res.status(500).json({ error: 'Failed to fetch testimonials' });
+    }
+  });
+
   // Get all reviews for a product
   app.get('/api/products/:id/reviews', async (req, res) => {
     try {
@@ -3498,7 +3671,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Product not found' });
       }
 
-      const reviews = await storage.getProductReviews(productId);
+      const reviews = (await storage.getProductReviews(productId)).filter(review => review.isApproved !== false && review.isFlagged !== true);
 
       // Sort reviews based on query parameter
       let sortedReviews = [...reviews];
@@ -3583,7 +3756,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const rating = await storage.getProductRating(productId);
-      const reviews = await storage.getProductReviews(productId);
+      const reviews = (await storage.getProductReviews(productId)).filter(review => review.isApproved !== false && review.isFlagged !== true);
 
       // Calculate star distribution
       const starDistribution = {
@@ -3641,7 +3814,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...req.body,
         productId,
         userId,
-        isVerifiedPurchase: hasOrderedProduct
+        isVerifiedPurchase: hasOrderedProduct,
+        isApproved: false,
+        isFlagged: false
       });
 
       const review = await storage.createReview(validatedData);

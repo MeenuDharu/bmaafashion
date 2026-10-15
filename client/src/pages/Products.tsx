@@ -382,15 +382,8 @@ export default function Products({ onAddToCart, onViewProductDetails }: Products
     availabilityFilter.length !== 2 ||
     minRating > 0;
 
-  if (productsLoading || categoriesLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin w-12 h-12 border-4 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
-  }
-
-  // Get selected category data for hero section display
+  // Get selected category data for hero section display.
+  // Keep this hook above the loading return so the hook order never changes between renders.
   const selectedCategoryData = useMemo(() => {
     if (selectedCategory === "all") {
       return {
@@ -423,6 +416,14 @@ export default function Products({ onAddToCart, onViewProductDetails }: Products
       isSubcategory: true
     };
   }, [selectedCategory, categoriesData]);
+
+  if (productsLoading || categoriesLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin w-12 h-12 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
 
   // Get current category name for breadcrumb and hero
   const currentCategoryName = selectedCategory === "all" ? "Home" : selectedCategory;

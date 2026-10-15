@@ -74,8 +74,6 @@ const settingsSchema = z.object({
   // Policies
   policies: z.object({
     shipping: z.object({
-      freeThreshold: z.coerce.number().min(0).optional(),
-      shippingCost: z.coerce.number().min(0).optional(),
       deliveryDays: z.string().optional(),
       text: z.string().optional(),
     }).optional(),
@@ -390,7 +388,7 @@ const defaultValues: SettingsForm = {
   featuredCategories: [],
   customBanners: [],
   policies: {
-    shipping: { freeThreshold: 5000, shippingCost: 100, deliveryDays: "5-7 business days", text: "" },
+    shipping: { deliveryDays: "5-7 business days", text: "" },
     returns: { windowDays: 7, text: "" },
     gst: { rate: 18, text: "" },
   },
@@ -1142,25 +1140,14 @@ function AdminSettingsContent() {
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">Shipping Policy</CardTitle>
-                    <CardDescription>Structured shipping rules + any extra text shown on the Shipping Policy page.</CardDescription>
+                    <CardDescription>Manage shipping rates under Commerce Features → Delivery. This section controls only the delivery estimate and policy text shown to customers.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                    <div className="text-sm text-muted-foreground rounded-md border p-3">
+                      Shipping rates and state-wise charges are configured in <strong>Commerce Features → Delivery</strong>. Checkout uses the selected delivery address state to calculate shipping.
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <FormField control={form.control} name="policies.shipping.freeThreshold" render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Free Shipping Above (₹)</FormLabel>
-                          <FormControl><Input type="number" {...field} value={field.value ?? ""} placeholder="5000" /></FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )} />
-                      <FormField control={form.control} name="policies.shipping.shippingCost" render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Standard Shipping Cost (₹)</FormLabel>
-                          <FormControl><Input type="number" min="0" step="0.01" {...field} value={field.value ?? 0} /></FormControl>
-                          <p className="text-xs text-muted-foreground">Applied when the order is below the free-shipping threshold.</p>
-                        </FormItem>
-                      )} />
-                      <FormField control={form.control} name="policies.shipping.deliveryDays" render={({ field }) => (
+                    <FormField control={form.control} name="policies.shipping.deliveryDays" render={({ field }) => (
                         <FormItem>
                           <FormLabel>Estimated Delivery Time</FormLabel>
                           <FormControl><Input {...field} value={field.value ?? ""} placeholder="5-7 business days" /></FormControl>

@@ -1829,20 +1829,22 @@ export class DatabaseStorage implements IStorage {
 
   // SECURE order creation - prevents price tampering and ensures atomicity
   private async calculateShippingCost(tx: any, shippingAddress: string, subtotal: number, items: any[]): Promise<number> {
-    const policyConfig = await tx.select().from(siteSettings).where(eq(siteSettings.id, 1)).limit(1);
-    const policy = policyConfig[0]?.policies?.shipping || {};
     const lines = String(shippingAddress || "").split(/\n/).map(v => v.trim()).filter(Boolean);
     const locationLine = lines[2] || "";
     const parts = locationLine.split(",").map(v => v.trim());
-    const state = (parts[1] || parts[0] || "").replace(/\b\d{5,6}\b/g, "").trim().toLowerCase();
-    const country = (lines[3] || "India").trim().toLowerCase();
+    const state = (parts.length > 1 ? parts.slice(1).join(",") : "").replace(/\b\d{5,6}\b/g, "").trim().toLowerCase();
+    const country = (lines[3] || "").trim().toLowerCase();
+    if (!state || !country) {
+      throw new Error("A delivery address with a valid state and country is required to calculate shipping.");
+    }
     const rules = await tx.select().from(shippingRules).where(eq(shippingRules.active, true)).orderBy(asc(shippingRules.priority));
     const rule = rules
       .filter((r: any) => (!r.country || r.country.trim().toLowerCase() === country) && (!r.state || r.state.trim().toLowerCase() === state))
       // State-specific shipping must override the country-wide default. Priority breaks ties.
       .sort((a: any, b: any) => Number(Boolean(b.state?.trim())) - Number(Boolean(a.state?.trim())) || Number(a.priority || 0) - Number(b.priority || 0))[0];
-    const chargePerGroup = rule ? Math.max(0, Number(rule.shippingCharge || 0)) : Math.max(0, Number(policy.shippingCost ?? 60));
-    const freeThreshold = rule?.freeShippingThreshold != null ? Math.max(0, Number(rule.freeShippingThreshold)) : Math.max(0, Number(policy.freeThreshold || 0));
+    // Shipping rates are managed in Admin → Commerce Features → Delivery.
+    const chargePerGroup = rule ? Math.max(0, Number(rule.shippingCharge || 0)) : 60;
+    const freeThreshold = rule?.freeShippingThreshold != null ? Math.max(0, Number(rule.freeShippingThreshold)) : 0;
     const totalQuantity = items.reduce((sum: number, item: any) => sum + Math.max(0, Math.floor(Number(item.quantity || 0))), 0);
     const normalShipping = freeThreshold > 0 && subtotal >= freeThreshold ? 0 : (totalQuantity > 0 ? Math.ceil(totalQuantity / 2) * chargePerGroup : 0);
     // Shipping follows the destination rule and total item quantity. Product-level shipping is not added again.
@@ -2888,9 +2890,10 @@ export class DatabaseStorage implements IStorage {
       .from(productReviews)
       .where(eq(productReviews.productId, productId));
     
-    const totalReviews = reviews.length;
-    const averageRating = totalReviews > 0 
-      ? reviews.reduce((sum, review) => sum + review.rating, 0) / totalReviews 
+    const publicReviews = reviews.filter(review => review.isApproved !== false && review.isFlagged !== true);
+    const totalReviews = publicReviews.length;
+    const averageRating = totalReviews > 0
+      ? publicReviews.reduce((sum, review) => sum + review.rating, 0) / totalReviews
       : 0;
     
     return { averageRating, totalReviews };

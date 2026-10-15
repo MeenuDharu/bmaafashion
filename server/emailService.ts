@@ -22,7 +22,7 @@ if (!process.env.SMTP_EMAIL || !process.env.SMTP_PASSWORD) {
 
 // Create SMTP transporter with Outlook/Office365 configuration
 const transporter = nodemailer.createTransport({
-  host: "smtp.google.com",
+  host: "smtp.gmail.com",
   port: 587,
   secure: false, // true for 465, false for other ports
   auth: {
@@ -40,7 +40,7 @@ const transporter = nodemailer.createTransport({
 // Verify SMTP connection on startup
 if (process.env.SMTP_EMAIL && process.env.SMTP_PASSWORD) {
   console.log("📧 EMAIL CONFIGURATION:");
-  console.log(`   SMTP Host: smtp.office365.com:587`);
+  console.log(`   SMTP Host: smtp.gmail.com:587`);
   console.log(`   SMTP Email: ${process.env.SMTP_EMAIL}`);
   console.log(`   SMTP Password: ${process.env.SMTP_PASSWORD ? '***configured***' : 'NOT SET'}`);
   console.log(`   FROM Address will be: ${process.env.SMTP_EMAIL}`);
@@ -537,6 +537,12 @@ export function generateOrderConfirmationTemplate(
                 <span style="color: #666; font-size: 14px;">Subtotal: </span>
                 <span style="color: #333; font-weight: 600;">₹${Number(order.subtotal).toFixed(2)}</span>
               </div>
+              ${Number(order.couponDiscount || 0) > 0 ? `
+                <div style="margin-bottom: 8px; color: #16803c;">
+                  <span style="font-size: 14px;">Discount${Number(order.subtotal) > 0 ? ` (${((Number(order.couponDiscount || 0) / Number(order.subtotal)) * 100).toFixed(2).replace(/\.00$/, "")}% )`.replace("% )", "%)") : ""}: </span>
+                  <span style="font-weight: 600;">-₹${Number(order.couponDiscount || 0).toFixed(2)}</span>
+                </div>
+              ` : ""}
               ${Number(order.shippingCost) > 0
       ? `
                 <div style="margin-bottom: 8px;">
@@ -703,6 +709,12 @@ export function generateAdminOrderNotificationTemplate(
                 <span style="color: #666; font-size: 14px;">Subtotal: </span>
                 <span style="color: #333; font-weight: 600;">₹${Number(order.subtotal).toFixed(2)}</span>
               </div>
+              ${Number(order.couponDiscount || 0) > 0 ? `
+                <div style="margin-bottom: 8px; color: #16803c;">
+                  <span style="font-size: 14px;">Discount${Number(order.subtotal) > 0 ? ` (${((Number(order.couponDiscount || 0) / Number(order.subtotal)) * 100).toFixed(2).replace(/\.00$/, "")}% )`.replace("% )", "%)") : ""}: </span>
+                  <span style="font-weight: 600;">-₹${Number(order.couponDiscount || 0).toFixed(2)}</span>
+                </div>
+              ` : ""}
               ${Number(order.shippingCost) > 0
       ? `
                 <div style="margin-bottom: 8px;">

@@ -21,37 +21,8 @@ import {
 } from "lucide-react";
 import { SiWhatsapp } from "react-icons/si";
 
-// Customer reviews data
-const customerReviews = [
-  {
-    name: "Priya Sharma",
-    location: "Mumbai",
-    rating: 5,
-    review: "Absolutely love the quality and designs! The kurtis are so comfortable and stylish. Perfect for both casual and formal occasions. Highly recommend!",
-    image: "/api/images/banner1.jpeg"
-  },
-  {
-    name: "Anjali Reddy",
-    location: "Hyderabad",
-    rating: 5,
-    review: "Beautiful collection of sarees! The fabric quality is excellent and the colors are vibrant. Great customer service too. Will definitely shop again!",
-    image: "/api/images/banner2.jpeg"
-  },
-  {
-    name: "Meera Patel",
-    location: "Ahmedabad",
-    rating: 5,
-    review: "The co-ord sets are amazing! Perfect fit and the material is premium. Received so many compliments. Best ethnic wear store!",
-    image: "/api/images/banner3.jpeg"
-  },
-  {
-    name: "Lakshmi Iyer",
-    location: "Chennai",
-    rating: 5,
-    review: "Excellent shopping experience! The traditional kurti sets are gorgeous and the plus size collection is fantastic. Thank you for inclusive sizing!",
-    image: "/api/images/banner1.jpeg"
-  }
-];
+// Homepage testimonials are loaded from approved product reviews in the database.
+// No sample or hardcoded customer testimonials are shown.
 
 function CountdownBanner({ settings }: { settings: any }) {
   const [remaining, setRemaining] = useState(0);
@@ -79,6 +50,16 @@ export default function Home() {
   } = useSiteSettings();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [currentReview, setCurrentReview] = useState(0);
+  const { data: customerReviews = [], isLoading: testimonialsLoading } = useQuery<any[]>({
+    queryKey: ["/api/testimonials"],
+    queryFn: async () => {
+      const response = await fetch("/api/testimonials");
+      if (!response.ok) throw new Error("Failed to load testimonials");
+      return response.json();
+    },
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
 
   const homeStructuredData = useMemo(() => [
     ORGANIZATION_DATA,
@@ -158,11 +139,19 @@ export default function Home() {
 
   // Auto-scroll reviews
   useEffect(() => {
+    if (customerReviews.length < 2) {
+      setCurrentReview(0);
+      return;
+    }
     const timer = setInterval(() => {
       setCurrentReview((prev) => (prev + 1) % customerReviews.length);
     }, 6000);
     return () => clearInterval(timer);
-  }, []);
+  }, [customerReviews.length]);
+
+  useEffect(() => {
+    if (currentReview >= customerReviews.length) setCurrentReview(0);
+  }, [currentReview, customerReviews.length]);
 
   // Categories with images and counts
   const categories = useMemo(() => {
@@ -448,10 +437,14 @@ export default function Home() {
             <p className="text-gray-300 text-lg">Trusted by thousands of happy customers</p>
           </div>
 
-          {/* Reviews Carousel */}
-          <div className="relative">
+          {/* Reviews Carousel: only admin-approved customer reviews are shown */}
+          {testimonialsLoading ? (
+            <div className="text-center text-gray-300 py-12" role="status">Loading customer reviews…</div>
+          ) : customerReviews.length === 0 ? (
+            <div className="text-center text-gray-300 py-12">No approved customer reviews yet. Be the first to share your experience.</div>
+          ) : <div className="relative">
             <div className="overflow-hidden">
-              {customerReviews.map((review, index) => (
+              {customerReviews.map((review: any, index: number) => (
                 <div
                   key={index}
                   className={`transition-all duration-700 ${
@@ -475,16 +468,18 @@ export default function Home() {
 
                     {/* Reviewer Info */}
                     <div className="flex items-center justify-center gap-4">
-                      <div className="w-14 h-14 rounded-full overflow-hidden border-4 border-pink-100">
-                        <img
-                          src={review.image}
-                          alt={review.name}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
+                      {review.profileImageUrl ? (
+                        <div className="w-14 h-14 rounded-full overflow-hidden border-4 border-pink-100">
+                          <img src={review.profileImageUrl} alt={review.name} className="w-full h-full object-cover" />
+                        </div>
+                      ) : (
+                        <div className="w-14 h-14 rounded-full border-4 border-pink-100 bg-pink-50 text-pink-700 flex items-center justify-center font-bold text-lg" aria-hidden="true">
+                          {(review.name || "C").trim().charAt(0).toUpperCase()}
+                        </div>
+                      )}
                       <div className="text-left">
-                        <h4 className="font-bold text-gray-900 text-lg">{review.name}</h4>
-                        <p className="text-gray-500 text-sm">{review.location}</p>
+                        <h4 className="font-bold text-gray-900 text-lg">{review.name || "Verified customer"}</h4>
+                        {review.productName && <p className="text-gray-500 text-sm">Reviewed: {review.productName}</p>}
                       </div>
                     </div>
                   </div>
@@ -518,7 +513,7 @@ export default function Home() {
                 />
               ))}
             </div>
-          </div>
+          </div>}
         </div>
       </section>
       </>)}

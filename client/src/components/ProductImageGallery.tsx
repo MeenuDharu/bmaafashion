@@ -37,7 +37,7 @@ const ImageThumbnail = ({ src, alt, isActive, onClick, index }: ImageThumbnailPr
     <button
       onClick={onClick}
       className={`
-        relative aspect-square rounded-md overflow-hidden border-2 transition-all duration-200 
+        relative aspect-[4/5] rounded-md overflow-hidden border-2 transition-all duration-200 bg-white 
         ${isActive 
           ? 'border-primary ring-2 ring-primary/20' 
           : 'border-muted hover:border-primary/50'
@@ -58,7 +58,7 @@ const ImageThumbnail = ({ src, alt, isActive, onClick, index }: ImageThumbnailPr
         <img
           src={src}
           alt={alt}
-          className={`w-full h-full object-cover transition-opacity duration-200 ${
+          className={`w-full h-full object-contain transition-opacity duration-200 ${
             isLoading ? 'opacity-0' : 'opacity-100'
           }`}
           onLoad={() => setIsLoading(false)}
@@ -186,7 +186,7 @@ export default function ProductImageGallery({
   }, [currentImageIndex]);
 
   const MainImageDisplay = ({ isInLightbox = false }: { isInLightbox?: boolean }) => (
-    <div className={`relative ${isInLightbox ? 'w-full h-full' : 'aspect-square'} bg-muted rounded-lg overflow-hidden group`}>
+    <div className={`relative ${isInLightbox ? 'w-full h-full' : 'aspect-[4/5] min-h-[420px] max-h-[720px]'} bg-white rounded-lg overflow-hidden group`}>
       {/* Loading skeleton */}
       {isMainImageLoading && (
         <Skeleton className="absolute inset-0 w-full h-full" />
@@ -215,7 +215,7 @@ export default function ProductImageGallery({
             src={currentImage}
             alt={`${productName} - Image ${currentImageIndex + 1}`}
             className={`
-              w-full h-full object-cover transition-all duration-300 cursor-zoom-in
+              w-full h-full object-contain transition-all duration-300 cursor-zoom-in
               ${isMainImageLoading ? 'opacity-0' : 'opacity-100'}
               ${isZoomed && !isInLightbox ? 'scale-150 cursor-zoom-out' : ''}
             `}
