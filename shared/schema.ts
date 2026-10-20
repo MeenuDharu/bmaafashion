@@ -2075,6 +2075,8 @@ export const adminOrderDetailSchema = z.object({
     productName: z.string(),
     productPrice: z.number(),
     quantity: z.number(),
+    size: z.string().nullable().optional(),
+    color: z.string().nullable().optional(),
     totalPrice: z.number(),
     productImage: z.string().optional(), // First product image
   })).optional(),

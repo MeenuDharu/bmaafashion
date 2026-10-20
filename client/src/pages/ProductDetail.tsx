@@ -162,13 +162,25 @@ export default function ProductDetail({ onAddToCart }: ProductDetailProps) {
         .filter(v => v.size && v.isActive !== false)
         .map(v => v.size!)
     ));
-    if (variantSizes.length > 0) return variantSizes;
+    // Keep clothing sizes in the same customer-friendly order everywhere.
+    const sortSizes = (sizes: string[]) => {
+      const sizeOrder = ["S", "M", "L", "XL", "2XL", "3XL"];
+      return [...sizes].sort((a, b) => {
+        const indexA = sizeOrder.indexOf(a.trim().toUpperCase());
+        const indexB = sizeOrder.indexOf(b.trim().toUpperCase());
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+        return a.localeCompare(b);
+      });
+    };
+    if (variantSizes.length > 0) return sortSizes(variantSizes);
 
     // Preserve the existing product-size/default fallback for categories
     // that require size selection.
     if (!isSizeRequired(product.category)) return [];
     const productSizes = parseSizes(product.size);
-    return productSizes.length > 0 ? productSizes : getDefaultSizes();
+    return sortSizes(productSizes.length > 0 ? productSizes : getDefaultSizes());
   }, [product, variants]);
 
   // Check if size selection is required for this product

@@ -186,7 +186,7 @@ export default function Products({ onAddToCart, onViewProductDetails }: Products
       }
     });
     // Sort sizes in a logical order
-    const sizeOrder = ["XS", "S", "M", "L", "XL", "XXL", "2XL", "3XL", "4XL", "5XL", "6XL", "Free Size", "One Size"];
+    const sizeOrder = ["S", "M", "L", "XL", "2XL", "3XL"];
     return Array.from(sizesSet).sort((a, b) => {
       const indexA = sizeOrder.indexOf(a);
       const indexB = sizeOrder.indexOf(b);

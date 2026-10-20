@@ -179,8 +179,8 @@ function getBaseEmailTemplate(title: string, content: string): string {
           
           <div style="border-top: 1px solid #dee2e6; padding-top: 20px; text-align: center;">
             <div style="margin-bottom: 15px;">
-              <a href="${process.env.DOMAIN || "http://localhost:5000"}/privacy-policy" style="color: #666; text-decoration: none; margin: 0 10px; font-size: 14px;">Privacy Policy</a>
-              <a href="${process.env.DOMAIN || "http://localhost:5000"}/terms-of-service" style="color: #666; text-decoration: none; margin: 0 10px; font-size: 14px;">Terms of Service</a>
+              <a href="${process.env.DOMAIN || "http://localhost:5000/"}privacy-policy" style="color: #666; text-decoration: none; margin: 0 10px; font-size: 14px;">Privacy Policy</a>
+              <a href="${process.env.DOMAIN || "http://localhost:5000/"}terms-of-service" style="color: #666; text-decoration: none; margin: 0 10px; font-size: 14px;">Terms of Service</a>
             </div>
             <p style="color: #999; font-size: 12px; margin: 0;">
               © 2025 Bmaafashion. All rights reserved.<br>
@@ -487,7 +487,7 @@ export function generateOrderConfirmationTemplate(
         <div style="display: flex; align-items: center;" class="order-item">
           <div style="flex: 1;" class="product-details">
             <h4 style="color: #2d5a2d; font-size: 16px; margin: 0 0 5px 0; font-weight: 600;">${item.productName}</h4>
-            <p style="color: #666; font-size: 14px; margin: 0;">Quantity: ${item.quantity} × ₹${Number(item.productPrice).toFixed(2)}</p>
+            <p style="color: #666; font-size: 14px; margin: 0;">${item.size ? `Size: ${item.size} · ` : ""}${item.color ? `Color: ${item.color} · ` : ""}Quantity: ${item.quantity} × ₹${Number(item.productPrice).toFixed(2)}</p>
           </div>
           <div style="text-align: right; font-weight: 600; color: #2d5a2d; font-size: 16px;">
             ₹${Number(item.totalPrice).toFixed(2)}
@@ -609,7 +609,7 @@ Order Items:
 ${order.items
       .map(
         (item) =>
-          `• ${item.productName} (Qty: ${item.quantity}) - ₹${Number(item.totalPrice).toFixed(2)}`,
+          `• ${item.productName}${item.size ? ` (Size: ${item.size})` : ""}${item.color ? ` (Color: ${item.color})` : ""} (Qty: ${item.quantity}) - ₹${Number(item.totalPrice).toFixed(2)}`,
       )
       .join("\n")}
 
@@ -649,7 +649,7 @@ export function generateAdminOrderNotificationTemplate(
         <div style="display: flex; align-items: center;" class="order-item">
           <div style="flex: 1;" class="product-details">
             <h4 style="color: #2d5a2d; font-size: 16px; margin: 0 0 5px 0; font-weight: 600;">${item.productName}</h4>
-            <p style="color: #666; font-size: 14px; margin: 0;">Quantity: ${item.quantity} × ₹${Number(item.productPrice).toFixed(2)}</p>
+            <p style="color: #666; font-size: 14px; margin: 0;">${item.size ? `Size: ${item.size} · ` : ""}${item.color ? `Color: ${item.color} · ` : ""}Quantity: ${item.quantity} × ₹${Number(item.productPrice).toFixed(2)}</p>
           </div>
           <div style="text-align: right; font-weight: 600; color: #2d5a2d; font-size: 16px;">
             ₹${Number(item.totalPrice).toFixed(2)}
@@ -758,7 +758,7 @@ export function generateAdminOrderNotificationTemplate(
     
     <!-- Action Buttons -->
     <div style="text-align: center; margin: 30px 0;">
-      ${getPrimaryButton("View Order in Admin Panel", `${process.env.DOMAIN || "http://localhost:5000"}/admin/orders`)}
+      ${getPrimaryButton("View Order in Admin Panel", `${process.env.DOMAIN || "http://localhost:5000/"}admin/orders`)}
     </div>
     
     <!-- Next Steps -->
@@ -794,7 +794,7 @@ Order Items:
 ${order.items
       .map(
         (item) =>
-          `• ${item.productName} (Qty: ${item.quantity}) - ₹${Number(item.totalPrice).toFixed(2)}`,
+          `• ${item.productName}${item.size ? ` (Size: ${item.size})` : ""}${item.color ? ` (Color: ${item.color})` : ""} (Qty: ${item.quantity}) - ₹${Number(item.totalPrice).toFixed(2)}`,
       )
       .join("\n")}
 
@@ -804,7 +804,7 @@ ${Number(order.shippingCost) > 0 ? `Shipping: ₹${Number(order.shippingCost).to
 Shipping Address:
 ${order.shippingAddress}
 
-${order.notes ? `Order Notes:\n${order.notes}\n\n` : ""}View Order: ${process.env.DOMAIN || "http://localhost:5000"}/admin/orders
+${order.notes ? `Order Notes:\n${order.notes}\n\n` : ""}View Order: ${process.env.DOMAIN || "http://localhost:5000/"}admin/orders
 
 Next Steps:
 Please review this order and update the order status as needed. The customer will receive notifications for any status changes.
@@ -867,7 +867,7 @@ export function generateOrderStatusUpdateTemplate(
     
     <!-- Action Buttons -->
     <div style="text-align: center; margin: 30px 0;">
-      ${getSecondaryButton("View Order Details", `${process.env.DOMAIN || "http://localhost:5000"}/order-access?token=${orderAccessToken || ''}&orderId=${order.id}`)}
+      ${getSecondaryButton("View Order Details", `${process.env.DOMAIN || "http://localhost:5000/"}order-access?token=${orderAccessToken || ''}&orderId=${order.id}`)}
     </div>
   `;
 
@@ -883,7 +883,7 @@ Status: ${order.status.toUpperCase()}
 
 ${statusMessage}
 
-${trackingNumber ? `Tracking Number: ${trackingNumber}\n` : ""}View order details: ${process.env.DOMAIN || "http://localhost:5000"}/order-access?token=${orderAccessToken || ''}&orderId=${order.id}
+${trackingNumber ? `Tracking Number: ${trackingNumber}\n` : ""}View order details: ${process.env.DOMAIN || "http://localhost:5000/"}order-access?token=${orderAccessToken || ''}&orderId=${order.id}
 
 Need help? Contact us at support@bmaafashion.com
 
@@ -942,7 +942,7 @@ export function generatePaymentConfirmationTemplate(
     
     <!-- Action Buttons -->
     <div style="text-align: center; margin: 30px 0;">
-      ${getSecondaryButton("View Order", `${process.env.DOMAIN || "http://localhost:5000"}/orders/${order.id}`)}
+      ${getSecondaryButton("View Order", `${process.env.DOMAIN || "http://localhost:5000/"}orders/${order.id}`)}
     </div>
     
     <!-- Next Steps -->
@@ -970,7 +970,7 @@ Payment Date: ${new Date().toLocaleDateString("en-IN")}
 
 Status: PAYMENT SUCCESSFUL ✅
 
-View Order: ${process.env.DOMAIN || "http://localhost:5000"}/orders/${order.id}
+View Order: ${process.env.DOMAIN || "http://localhost:5000/"}orders/${order.id}
 
 What Happens Next?
 Your payment has been successfully processed and your order is now being prepared for shipment. You'll receive tracking information once your items are dispatched.
@@ -1140,7 +1140,7 @@ export async function sendOrderConfirmationEmail(
     templateData: {
       order,
       customerName,
-      orderTrackingUrl: `${process.env.DOMAIN || "http://localhost:5000"}/order-access?token=${orderAccessToken}&orderId=${order.id}`,
+      orderTrackingUrl: `${process.env.DOMAIN || "http://localhost:5000/"}order-access?token=${orderAccessToken}&orderId=${order.id}`,
     },
     userId,
   });
@@ -1222,7 +1222,7 @@ export async function sendPaymentConfirmationEmail(
       order,
       customerName,
       paymentMethod,
-      receiptUrl: `${process.env.DOMAIN || "http://localhost:5000"}/api/orders/${order.id}/invoice`,
+      receiptUrl: `${process.env.DOMAIN || "http://localhost:5000/"}api/orders/${order.id}/invoice`,
     },
     userId,
   });
@@ -1248,7 +1248,7 @@ export async function sendPaymentFailureEmail(
       customerName,
       paymentMethod,
       failureReason: failureReason || "Payment verification failed",
-      retryUrl: `${process.env.DOMAIN || "http://localhost:5000"}/orders/${order.id}/retry-payment`,
+      retryUrl: `${process.env.DOMAIN || "http://localhost:5000/"}orders/${order.id}/retry-payment`,
     },
     userId,
   });
@@ -1261,7 +1261,7 @@ export async function sendAccountCreatedFromGuestEmail(
   temporaryPassword: string,
   userId: string,
 ): Promise<boolean> {
-  const loginUrl = `${process.env.DOMAIN || "http://localhost:5000"}/login`;
+  const loginUrl = `${process.env.DOMAIN || "http://localhost:5000/"}login`;
 
   return await queueEmail({
     type: EmailType.ACCOUNT_CREATED_FROM_GUEST,

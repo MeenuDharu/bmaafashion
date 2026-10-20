@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowLeft, Package, Calendar, MapPin, CreditCard, Truck, CheckCircle, Clock, RefreshCw, RotateCcw, X, AlertTriangle, Download, Eye, MessageSquare, Phone } from "lucide-react";
+import { ArrowLeft, Package, Calendar, MapPin, CreditCard, Truck, CheckCircle, Clock, RefreshCw, RotateCcw, X, AlertTriangle, Download, Eye, MessageSquare, Phone, Printer } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { useAuth, useAuthenticatedFetch } from "@/context/AuthContext";
@@ -450,6 +450,26 @@ function OrderDetailContent() {
 
   const orderData = order as OrderWithItems;
 
+  const printOrderBill = async () => {
+    // Open synchronously to avoid popup blockers, then load the authenticated 4x6 invoice.
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      toast({ title: "Popup blocked", description: "Please allow popups to print your bill.", variant: "destructive" });
+      return;
+    }
+    try {
+      const response = await authenticatedFetch(`/api/orders/${orderData.id}/invoice`);
+      if (!response.ok) throw new Error("Unable to generate order bill");
+      const html = await response.text();
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+    } catch (error) {
+      printWindow.close();
+      toast({ title: "Bill unavailable", description: error instanceof Error ? error.message : "Unable to generate order bill.", variant: "destructive" });
+    }
+  };
+
   // Status progression
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -487,6 +507,11 @@ function OrderDetailContent() {
               </div>
             </div>
             
+            <Button variant="outline" onClick={printOrderBill} data-testid="button-print-order-bill">
+              <Printer className="h-4 w-4 mr-2" />
+              Print 4×6 Bill
+            </Button>
+
             {/* Retry Payment Button for Pending Payments */}
             {orderData.paymentStatus === 'pending' && !isOrderAccessMode && (
               <Button 
@@ -615,6 +640,8 @@ function OrderDetailContent() {
                         </h4>
                         <div className="flex items-center space-x-4 mt-2 text-sm text-muted-foreground">
                           <span>Quantity: {item.quantity}</span>
+                          {item.size && <span>Size: {item.size}</span>}
+                          {item.color && <span>Color: {item.color}</span>}
                           <span>Price: ₹{parseFloat(item.productPrice).toLocaleString()}</span>
                         </div>
                       </div>

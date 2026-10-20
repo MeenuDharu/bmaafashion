@@ -133,17 +133,27 @@ export function registerCommerceFeatureRoutes(app: Express) {
       const rules = await db.select().from(shippingRules).where(eq(shippingRules.active, true)).orderBy(asc(shippingRules.priority));
       const normalizedCountry = countryName.toLowerCase();
       const normalizedState = stateName.toLowerCase();
-      const matching = rules
-        .filter(rule => {
-          const countryMatches = !rule.country || rule.country.trim().toLowerCase() === normalizedCountry;
-          const stateMatches = !rule.state || rule.state.trim().toLowerCase() === normalizedState;
-          return countryMatches && stateMatches;
-        })
-        // A state-specific rule must win over a country-wide rule, regardless of priority.
-        .sort((a, b) => Number(Boolean(b.state?.trim())) - Number(Boolean(a.state?.trim())) || Number(a.priority || 0) - Number(b.priority || 0))[0];
-      // Shipping configuration is managed in Admin → Commerce Features → Delivery.
-      // The ₹60 default is used only when no destination rule exists.
-      const chargePerGroup = matching ? Number(matching.shippingCharge || 0) : 60;
+      const countryRules = rules.filter(rule => !rule.country || rule.country.trim().toLowerCase() === normalizedCountry);
+      // Exact state rules always win. "Other" is a fallback rule for states without
+      // their own rule; it must not override a specific state rule or built-in India rates.
+      const exactStateRule = countryRules
+        .filter(rule => rule.state?.trim() && rule.state.trim().toLowerCase() === normalizedState)
+        .sort((a, b) => Number(a.priority || 0) - Number(b.priority || 0))[0];
+      const otherStateRule = countryRules
+        .filter(rule => rule.state?.trim().toLowerCase() === "other")
+        .sort((a, b) => Number(a.priority || 0) - Number(b.priority || 0))[0];
+      const countryWideRule = countryRules
+        .filter(rule => !rule.state?.trim())
+        .sort((a, b) => Number(a.priority || 0) - Number(b.priority || 0))[0];
+      const indiaState = normalizedState.replace(/\s+/g, " ").trim();
+      const indiaDefaultCharge: Record<string, number> = {
+        "tamil nadu": 80, "karnataka": 130, "andhra pradesh": 130,
+        "telangana": 130, "kerala": 140,
+      };
+      const isIndia = normalizedCountry === "india" || normalizedCountry === "in";
+      const hasBuiltInIndiaRate = isIndia && Object.prototype.hasOwnProperty.call(indiaDefaultCharge, indiaState);
+      const matching = exactStateRule || (hasBuiltInIndiaRate ? undefined : (otherStateRule || countryWideRule));
+      const chargePerGroup = matching ? Number(matching.shippingCharge || 0) : (isIndia ? (indiaDefaultCharge[indiaState] ?? 160) : 60);
       const freeThreshold = matching?.freeShippingThreshold != null ? Number(matching.freeShippingThreshold) : 0;
       const merchandiseSubtotal = Math.max(0, Number(subtotal || 0));
       const totalQuantity = itemList.reduce((sum: number, item: any) => sum + Math.max(0, Math.floor(Number(item.quantity || 0))), 0);

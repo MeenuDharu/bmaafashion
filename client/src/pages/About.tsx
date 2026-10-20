@@ -19,12 +19,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useSiteSettings } from "@/hooks/useSiteSettings";
-import { safeImageImport, handleImageError as handleImgError, PLACEHOLDER_IMAGE } from "@/lib/image-utils";
+import { handleImageError as handleImgError } from "@/lib/image-utils";
 
-// Import images with fallback support
-const heroImage = safeImageImport("/attached_assets/bmaafashion.jpeg");
-const farmImage = safeImageImport("/attached_assets/heroicimage.png");
-const techImage = safeImageImport("/attached_assets/banner1.jpeg");
+// Local public assets: separate, real image files for each About Us section.
+const heroImage = "/about-images/boutique-interior.jpg";
+const farmImage = "/about-images/mission-fashion-portrait.jpg";
+const techImage = "/about-images/future-collection.jpg";
+const aboutHeroModelImage = "/about-images/about-hero-model.jpg";
 
 export default function About() {
   const { pageBanners, seoSettings } = useSiteSettings();
@@ -48,8 +49,7 @@ export default function About() {
       "About Bmaafashion | Redefining Fashion Through Innovation",
     ogDescription:
       "Discover how Bmaafashion is revolutionizing fashion with our curated collections, expert styling, and sustainable fashion practices.",
-    ogImage:
-      "/attached_assets/bmaafashion.jpeg",
+    ogImage: aboutHeroModelImage,
     ogUrl: typeof window !== "undefined" ? window.location.href : undefined,
     keywords: "Bmaafashion about, fashion company, style expertise, curated collections",
     structuredData: aboutStructuredData,
@@ -93,17 +93,17 @@ export default function About() {
   const banner = pageBanners?.about;
   const bannerTitle = banner?.title || "About Us";
   const bannerSubtitle = banner?.subtitle || "A considered collection of modern elegance, timeless design, and personal style";
-  const bannerImage = banner?.imageUrl || heroImage;
+  // Site Settings banner takes priority; otherwise use the dedicated About Us model photo.
+  const bannerImage = banner?.imageUrl || aboutHeroModelImage;
 
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section */}
       <div
         className="relative text-white py-10 sm:py-12 md:py-16 overflow-hidden"
-        style={banner?.imageUrl ? { backgroundImage: `url(${banner.imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" } : {}}
+        style={{ backgroundImage: `linear-gradient(90deg, rgba(25,18,10,.60), rgba(25,18,10,.18)), url(${bannerImage})`, backgroundSize: "cover", backgroundPosition: "center" }}
       >
-        {banner?.imageUrl && <div className="absolute inset-0 bg-black/55" />}
-        {!banner?.imageUrl && <div className="absolute inset-0 bg-gradient-to-r from-primary to-secondary" />}
+        <div className="absolute inset-0 bg-black/20" />
         <div className="relative container mx-auto px-4 text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-4 sm:mb-6">{bannerTitle}</h1>
           <p className="text-lg sm:text-xl opacity-90 max-w-3xl mx-auto px-4">{bannerSubtitle}</p>
@@ -111,11 +111,11 @@ export default function About() {
       </div>
 
       {/* Hero Image */}
-      <div className="container mx-auto px-4 -mt-6 sm:-mt-8">
+      {/* <div className="container mx-auto px-4 -mt-6 sm:-mt-8">
         <div className="max-w-6xl mx-auto rounded-xl overflow-hidden shadow-2xl bg-muted">
           <img
-            src={bannerImage}
-            alt="Bmaafashion boutique collection"
+            src={heroImage}
+            alt="Bmaafashion boutique interior and curated clothing collections"
             className="w-full h-[250px] sm:h-[350px] md:h-[400px] object-cover"
             loading="eager"
             decoding="async"
@@ -123,7 +123,7 @@ export default function About() {
             onError={handleImgError}
           />
         </div>
-      </div>
+      </div> */}
 
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8 sm:py-12 md:py-16">
@@ -164,13 +164,13 @@ export default function About() {
           </p>
         </div>
 
-        {/* Farm Image */}
+        {/* Distinct fashion portrait image */}
         <div className="max-w-5xl mx-auto mb-10 sm:mb-12 md:mb-16">
           <div className="rounded-xl overflow-hidden shadow-lg bg-muted">
             <img
               src={farmImage}
-              alt="Fashion collections at Bmaafashion boutique"
-              className="w-full h-[250px] sm:h-[300px] md:h-[350px] object-cover"
+              alt="Elegant ethnic fashion portrait representing Bmaa Fashion's style"
+              className="w-full h-[250px] sm:h-[300px] md:h-[350px] object-cover object-center"
               loading="lazy"
               decoding="async"
               data-testid="img-farm"
@@ -248,11 +248,7 @@ export default function About() {
                 shopping experience feel personal.
             </p>
             <Link to="/contact">
-              <Button
-                variant="outline"
-                size="sm"
-                data-testid="button-get-expert-help"
-              >
+              <Button variant="outline" size="sm" data-testid="button-get-expert-help">
                 Get Expert Help
                 <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
@@ -284,7 +280,7 @@ export default function About() {
             <div className="h-[350px] md:h-[400px] bg-muted">
               <img
                 src={techImage}
-                alt="Bmaafashion fashion collection"
+                alt="Colorful ethnic and festive garments in the Bmaafashion collection"
                 className="w-full h-full object-cover object-center"
                 loading="lazy"
                 decoding="async"

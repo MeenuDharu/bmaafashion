@@ -1851,12 +1851,30 @@ export class DatabaseStorage implements IStorage {
       throw new Error("A delivery address with a valid state and country is required to calculate shipping.");
     }
     const rules = await tx.select().from(shippingRules).where(eq(shippingRules.active, true)).orderBy(asc(shippingRules.priority));
-    const rule = rules
-      .filter((r: any) => (!r.country || r.country.trim().toLowerCase() === country) && (!r.state || r.state.trim().toLowerCase() === state))
-      // State-specific shipping must override the country-wide default. Priority breaks ties.
-      .sort((a: any, b: any) => Number(Boolean(b.state?.trim())) - Number(Boolean(a.state?.trim())) || Number(a.priority || 0) - Number(b.priority || 0))[0];
-    // Shipping rates are managed in Admin → Commerce Features → Delivery.
-    const chargePerGroup = rule ? Math.max(0, Number(rule.shippingCharge || 0)) : 60;
+    const countryRules = rules.filter((r: any) => !r.country || r.country.trim().toLowerCase() === country);
+    const stateRule = countryRules
+      .filter((r: any) => r.state?.trim() && r.state.trim().toLowerCase() === state)
+      .sort((a: any, b: any) => Number(a.priority || 0) - Number(b.priority || 0))[0];
+    const otherStateRule = countryRules
+      .filter((r: any) => r.state?.trim().toLowerCase() === "other")
+      .sort((a: any, b: any) => Number(a.priority || 0) - Number(b.priority || 0))[0];
+
+    // Exact state rules win. "Other" applies to unmatched states except those with built-in rates.
+    const indiaState = state.replace(/\s+/g, " ").trim().toLowerCase();
+    const indiaDefaultCharge: Record<string, number> = {
+      "tamil nadu": 80, "karnataka": 130, "andhra pradesh": 130,
+      "telangana": 130, "kerala": 140,
+    };
+    const isIndia = country === "india" || country === "in";
+    const hasBuiltInIndiaRate = isIndia && Object.prototype.hasOwnProperty.call(indiaDefaultCharge, indiaState);
+    const defaultIndiaCharge = isIndia ? (indiaDefaultCharge[indiaState] ?? 160) : undefined;
+    const countryRule = countryRules
+      .filter((r: any) => !r.state?.trim())
+      .sort((a: any, b: any) => Number(a.priority || 0) - Number(b.priority || 0))[0];
+    const rule = stateRule || (hasBuiltInIndiaRate ? undefined : otherStateRule) || (defaultIndiaCharge === undefined ? countryRule : undefined);
+    const chargePerGroup = rule
+      ? Math.max(0, Number(rule.shippingCharge || 0))
+      : (defaultIndiaCharge ?? 60);
     const freeThreshold = rule?.freeShippingThreshold != null ? Math.max(0, Number(rule.freeShippingThreshold)) : 0;
     const totalQuantity = items.reduce((sum: number, item: any) => sum + Math.max(0, Math.floor(Number(item.quantity || 0))), 0);
     const normalShipping = freeThreshold > 0 && subtotal >= freeThreshold ? 0 : (totalQuantity > 0 ? Math.ceil(totalQuantity / 2) * chargePerGroup : 0);
@@ -2380,6 +2398,8 @@ export class DatabaseStorage implements IStorage {
             productName: orderItems.productName,
             productPrice: orderItems.productPrice,
             quantity: orderItems.quantity,
+            size: orderItems.size,
+            color: orderItems.color,
             totalPrice: orderItems.totalPrice,
             productImage: sql<string>`(SELECT ${products.images}[1] FROM ${products} WHERE ${products.id} = ${orderItems.productId})`
           })
@@ -2515,6 +2535,8 @@ export class DatabaseStorage implements IStorage {
         productName: orderItems.productName,
         productPrice: orderItems.productPrice,
         quantity: orderItems.quantity,
+        size: orderItems.size,
+        color: orderItems.color,
         totalPrice: orderItems.totalPrice,
         productImage: sql<string>`(SELECT ${products.images}[1] FROM ${products} WHERE ${products.id} = ${orderItems.productId})`
       })

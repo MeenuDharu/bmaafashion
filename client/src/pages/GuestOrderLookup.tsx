@@ -377,7 +377,7 @@ export default function GuestOrderLookup() {
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <p className="font-medium text-sm line-clamp-1">{item.productName}</p>
-                                    <p className="text-xs text-muted-foreground">Qty: {item.quantity}</p>
+                                    <p className="text-xs text-muted-foreground">Qty: {item.quantity}{item.size ? ` · Size: ${item.size}` : ""}{item.color ? ` · Color: ${item.color}` : ""}</p>
                                   </div>
                                   <div className="text-sm font-medium">
                                     ₹{parseFloat(item.totalPrice).toLocaleString()}

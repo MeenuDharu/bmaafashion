@@ -34,7 +34,8 @@ import {
   Minus,
   CheckSquare,
   Square,
-  Copy
+  Copy,
+  Printer
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -416,6 +417,28 @@ function AdminOrdersContent() {
       setIsOrderDetailOpen(true);
     } catch (error) {
       toast({ title: "Failed to load order details", variant: "destructive" });
+    }
+  };
+
+  // Print the selected order using the existing 4×6-inch invoice endpoint.
+  // This control is intentionally available only in the admin order details modal.
+  const printSelectedOrderBill = async () => {
+    if (!selectedOrder) return;
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      toast({ title: "Popup blocked", description: "Please allow popups to print the bill.", variant: "destructive" });
+      return;
+    }
+    try {
+      const response = await authenticatedFetch(`/api/orders/${selectedOrder.id}/invoice`);
+      if (!response.ok) throw new Error("Unable to generate order bill");
+      const html = await response.text();
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+    } catch (error) {
+      printWindow.close();
+      toast({ title: "Bill unavailable", description: error instanceof Error ? error.message : "Unable to generate order bill.", variant: "destructive" });
     }
   };
 
@@ -1090,6 +1113,15 @@ function AdminOrdersContent() {
               Complete information for Order #{selectedOrder?.id.slice(-8)}
             </DialogDescription>
           </DialogHeader>
+
+          {selectedOrder && (
+            <div className="flex justify-end -mt-2">
+              <Button variant="outline" size="sm" onClick={printSelectedOrderBill} data-testid="button-admin-print-4x6-bill">
+                <Printer className="h-4 w-4 mr-2" />
+                Print 4×6 Bill
+              </Button>
+            </div>
+          )}
           
           {selectedOrder && (
             <Tabs defaultValue="details" className="w-full">
@@ -1361,7 +1393,7 @@ function AdminOrdersContent() {
                             <div className="flex-1">
                               <h4 className="font-semibold">{item.productName}</h4>
                               <p className="text-sm text-muted-foreground">
-                                Quantity: {item.quantity} × ₹{item.productPrice.toLocaleString()}
+                                Quantity: {item.quantity} × ₹{item.productPrice.toLocaleString()}{item.size ? ` · Size: ${item.size}` : ""}{item.color ? ` · Color: ${item.color}` : ""}
                               </p>
                             </div>
                             <div className="text-right">

@@ -35,7 +35,15 @@ interface VariantFormData {
   color: string;
   size: string;
   price: string;
+  compareAtPrice: string;
   stockQuantity: string;
+  lowStockThreshold: string;
+  weight: string;
+  shippingChargeApplicable: boolean;
+  shippingCharge: string;
+  images: string;
+  isActive: boolean;
+  sortOrder: string;
   sku: string;
 }
 
@@ -50,7 +58,15 @@ export default function ProductVariantsManager({
     color: "",
     size: "",
     price: basePrice,
+    compareAtPrice: "",
     stockQuantity: "0",
+    lowStockThreshold: "5",
+    weight: "",
+    shippingChargeApplicable: false,
+    shippingCharge: "0",
+    images: "",
+    isActive: true,
+    sortOrder: "0",
     sku: "",
   });
 
@@ -83,9 +99,16 @@ export default function ProductVariantsManager({
             color: data.color || null,
             size: data.size || null,
             price: data.price,
-            stockQuantity: parseInt(data.stockQuantity),
+            compareAtPrice: data.compareAtPrice || null,
+            stockQuantity: parseInt(data.stockQuantity, 10),
+            lowStockThreshold: parseInt(data.lowStockThreshold, 10),
+            weight: data.weight || null,
+            shippingChargeApplicable: data.shippingChargeApplicable,
+            shippingCharge: data.shippingCharge || "0",
+            images: data.images.split("\n").map((image) => image.trim()).filter(Boolean),
+            isActive: data.isActive,
+            sortOrder: parseInt(data.sortOrder || "0", 10),
             sku: data.sku || null,
-            isActive: true,
           }),
         }
       );
@@ -117,20 +140,33 @@ export default function ProductVariantsManager({
       data,
     }: {
       variantId: string;
-      data: Partial<VariantFormData>;
+      data: VariantFormData;
     }) => {
       const response = await authenticatedFetch(
         `/api/admin/products/variants/${variantId}`,
         {
           method: "PUT",
           body: JSON.stringify({
+            color: data.color || null,
+            size: data.size || null,
             price: data.price,
-            stockQuantity: data.stockQuantity ? parseInt(data.stockQuantity) : undefined,
-            sku: data.sku,
+            compareAtPrice: data.compareAtPrice || null,
+            stockQuantity: parseInt(data.stockQuantity, 10),
+            lowStockThreshold: parseInt(data.lowStockThreshold, 10),
+            weight: data.weight || null,
+            shippingChargeApplicable: data.shippingChargeApplicable,
+            shippingCharge: data.shippingCharge || "0",
+            images: data.images.split("\n").map((image) => image.trim()).filter(Boolean),
+            isActive: data.isActive,
+            sortOrder: parseInt(data.sortOrder || "0", 10),
+            sku: data.sku || null,
           }),
         }
       );
-      if (!response.ok) throw new Error("Failed to update variant");
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.message || error.error || "Failed to update variant");
+      }
       return response.json();
     },
     onSuccess: () => {
@@ -138,9 +174,10 @@ export default function ProductVariantsManager({
       setEditingVariant(null);
       toast({ title: "Variant updated successfully" });
     },
-    onError: () => {
+    onError: (error: Error) => {
       toast({
         title: "Failed to update variant",
+        description: error.message,
         variant: "destructive",
       });
     },
@@ -171,12 +208,41 @@ export default function ProductVariantsManager({
 
   const resetForm = () => {
     setFormData({
-      color: "",
-      size: "",
-      price: basePrice,
-      stockQuantity: "0",
-      sku: "",
+      color: "", size: "", price: basePrice, compareAtPrice: "", stockQuantity: "0",
+      lowStockThreshold: "5", weight: "", shippingChargeApplicable: false,
+      shippingCharge: "0", images: "", isActive: true, sortOrder: "0", sku: "",
     });
+  };
+
+  const startEditingVariant = (variant: ProductVariant) => {
+    setEditingVariant(variant);
+    setFormData({
+      color: variant.color || "",
+      size: variant.size || "",
+      price: String(variant.price ?? basePrice),
+      compareAtPrice: String(variant.compareAtPrice ?? ""),
+      stockQuantity: String(variant.stockQuantity ?? 0),
+      lowStockThreshold: String(variant.lowStockThreshold ?? 5),
+      weight: String(variant.weight ?? ""),
+      shippingChargeApplicable: Boolean(variant.shippingChargeApplicable),
+      shippingCharge: String(variant.shippingCharge ?? "0"),
+      images: Array.isArray(variant.images) ? variant.images.join("\n") : "",
+      isActive: Boolean(variant.isActive),
+      sortOrder: String(variant.sortOrder ?? 0),
+      sku: variant.sku || "",
+    });
+  };
+
+  const handleSaveVariant = () => {
+    if (!formData.color && !formData.size) {
+      toast({ title: "Validation Error", description: "Please provide at least a color or size", variant: "destructive" });
+      return;
+    }
+    if (!formData.price || Number(formData.price) <= 0 || Number(formData.stockQuantity) < 0 || Number(formData.lowStockThreshold) < 0 || Number(formData.shippingCharge) < 0) {
+      toast({ title: "Validation Error", description: "Check price, stock, threshold and shipping charge values", variant: "destructive" });
+      return;
+    }
+    if (editingVariant) updateVariantMutation.mutate({ variantId: editingVariant.id, data: formData });
   };
 
   const handleAddVariant = () => {
@@ -212,9 +278,24 @@ export default function ProductVariantsManager({
   };
 
   const handleUpdateStock = (variant: ProductVariant, newStock: string) => {
+    // Keep the existing full-variant update contract while changing only stock.
     updateVariantMutation.mutate({
       variantId: variant.id,
-      data: { stockQuantity: newStock },
+      data: {
+        color: variant.color || "",
+        size: variant.size || "",
+        price: String(variant.price ?? basePrice),
+        compareAtPrice: String(variant.compareAtPrice ?? ""),
+        stockQuantity: newStock,
+        lowStockThreshold: String(variant.lowStockThreshold ?? 5),
+        weight: String(variant.weight ?? ""),
+        shippingChargeApplicable: Boolean(variant.shippingChargeApplicable),
+        shippingCharge: String(variant.shippingCharge ?? "0"),
+        images: Array.isArray(variant.images) ? variant.images.join("\n") : "",
+        isActive: Boolean(variant.isActive),
+        sortOrder: String(variant.sortOrder ?? 0),
+        sku: variant.sku || "",
+      },
     });
   };
 
@@ -320,55 +401,7 @@ export default function ProductVariantsManager({
                     </TableCell>
                     <TableCell>₹{parseFloat(variant.price || "0").toLocaleString()}</TableCell>
                     <TableCell>
-                      {editingVariant?.id === variant.id ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="number"
-                            min="0"
-                            defaultValue={variant.stockQuantity}
-                            className="w-20"
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                handleUpdateStock(
-                                  variant,
-                                  (e.target as HTMLInputElement).value
-                                );
-                              }
-                            }}
-                            id={`stock-${variant.id}`}
-                          />
-                          <Button type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              const input = document.getElementById(
-                                `stock-${variant.id}`
-                              ) as HTMLInputElement;
-                              handleUpdateStock(variant, input.value);
-                            }}
-                          >
-                            <Save className="h-4 w-4" />
-                          </Button>
-                          <Button type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setEditingVariant(null)}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold">{variant.stockQuantity}</span>
-                          <Button type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setEditingVariant(variant)}
-                          >
-                            <Edit2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      )}
+                      <span className="font-semibold">{variant.stockQuantity}</span>
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -388,11 +421,10 @@ export default function ProductVariantsManager({
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleDelete(variant.id)}
-                      >
+                      <Button type="button" size="sm" variant="ghost" onClick={() => startEditingVariant(variant)} title="Edit all variant fields">
+                        <Edit2 className="h-4 w-4" />
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => handleDelete(variant.id)} title="Delete variant">
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </TableCell>
@@ -501,6 +533,19 @@ export default function ProductVariantsManager({
             </div>
           </div>
 
+            <div className="grid grid-cols-2 gap-4">
+              <div><Label htmlFor="compareAtPrice">Compare-at Price (₹)</Label><Input id="compareAtPrice" type="number" min="0" step="0.01" value={formData.compareAtPrice} onChange={(e) => setFormData({ ...formData, compareAtPrice: e.target.value })} /></div>
+              <div><Label htmlFor="lowStockThreshold">Low Stock Threshold</Label><Input id="lowStockThreshold" type="number" min="0" value={formData.lowStockThreshold} onChange={(e) => setFormData({ ...formData, lowStockThreshold: e.target.value })} /></div>
+              <div><Label htmlFor="weight">Weight</Label><Input id="weight" type="number" min="0" step="0.01" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} /></div>
+              <div><Label htmlFor="shippingCharge">Shipping Charge (₹)</Label><Input id="shippingCharge" type="number" min="0" step="0.01" value={formData.shippingCharge} onChange={(e) => setFormData({ ...formData, shippingCharge: e.target.value })} /></div>
+              <div><Label htmlFor="sortOrder">Display Order</Label><Input id="sortOrder" type="number" value={formData.sortOrder} onChange={(e) => setFormData({ ...formData, sortOrder: e.target.value })} /></div>
+            </div>
+            <div className="flex flex-wrap gap-6 text-sm">
+              <label className="flex items-center gap-2"><input type="checkbox" checked={formData.shippingChargeApplicable} onChange={(e) => setFormData({ ...formData, shippingChargeApplicable: e.target.checked })} /> Shipping charge applicable</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={formData.isActive} onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })} /> Active variant</label>
+            </div>
+            <div><Label htmlFor="variantImages">Variant Images (one URL per line)</Label><textarea id="variantImages" className="w-full min-h-20 rounded-md border bg-background px-3 py-2 text-sm" value={formData.images} onChange={(e) => setFormData({ ...formData, images: e.target.value })} placeholder="https://example.com/image-1.jpg" /></div>
+
           <DialogFooter>
             <Button
               type="button"
@@ -519,6 +564,38 @@ export default function ProductVariantsManager({
             >
               {createVariantMutation.isPending ? "Creating..." : "Create Variant"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(editingVariant)} onOpenChange={(open) => { if (!open) setEditingVariant(null); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Product Variant</DialogTitle>
+            <DialogDescription>Edit all available fields for {productName}. Changes to stock will synchronize the parent product stock.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div><Label htmlFor="edit-color">Color</Label><Input id="edit-color" value={formData.color} onChange={(e) => setFormData({ ...formData, color: e.target.value })} /></div>
+              <div><Label htmlFor="edit-size">Size</Label><Input id="edit-size" value={formData.size} onChange={(e) => setFormData({ ...formData, size: e.target.value })} /></div>
+              <div><Label htmlFor="edit-price">Price (₹)</Label><Input id="edit-price" type="number" min="0.01" step="0.01" value={formData.price} onChange={(e) => setFormData({ ...formData, price: e.target.value })} /></div>
+              <div><Label htmlFor="edit-compare-price">Compare-at Price (₹)</Label><Input id="edit-compare-price" type="number" min="0" step="0.01" value={formData.compareAtPrice} onChange={(e) => setFormData({ ...formData, compareAtPrice: e.target.value })} /></div>
+              <div><Label htmlFor="edit-stock">Stock Quantity</Label><Input id="edit-stock" type="number" min="0" value={formData.stockQuantity} onChange={(e) => setFormData({ ...formData, stockQuantity: e.target.value })} /></div>
+              <div><Label htmlFor="edit-threshold">Low Stock Threshold</Label><Input id="edit-threshold" type="number" min="0" value={formData.lowStockThreshold} onChange={(e) => setFormData({ ...formData, lowStockThreshold: e.target.value })} /></div>
+              <div><Label htmlFor="edit-sku">SKU</Label><Input id="edit-sku" value={formData.sku} onChange={(e) => setFormData({ ...formData, sku: e.target.value })} /></div>
+              <div><Label htmlFor="edit-weight">Weight</Label><Input id="edit-weight" type="number" min="0" step="0.01" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} /></div>
+              <div><Label htmlFor="edit-shipping-charge">Shipping Charge (₹)</Label><Input id="edit-shipping-charge" type="number" min="0" step="0.01" value={formData.shippingCharge} onChange={(e) => setFormData({ ...formData, shippingCharge: e.target.value })} /></div>
+              <div><Label htmlFor="edit-sort-order">Display Order</Label><Input id="edit-sort-order" type="number" value={formData.sortOrder} onChange={(e) => setFormData({ ...formData, sortOrder: e.target.value })} /></div>
+            </div>
+            <div className="flex flex-wrap gap-6 text-sm">
+              <label className="flex items-center gap-2"><input type="checkbox" checked={formData.shippingChargeApplicable} onChange={(e) => setFormData({ ...formData, shippingChargeApplicable: e.target.checked })} /> Shipping charge applicable</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={formData.isActive} onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })} /> Active variant</label>
+            </div>
+            <div><Label htmlFor="edit-images">Variant Images (one URL per line)</Label><textarea id="edit-images" className="w-full min-h-24 rounded-md border bg-background px-3 py-2 text-sm" value={formData.images} onChange={(e) => setFormData({ ...formData, images: e.target.value })} placeholder="https://example.com/image-1.jpg" /></div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditingVariant(null)}>Cancel</Button>
+            <Button type="button" onClick={handleSaveVariant} disabled={updateVariantMutation.isPending}>{updateVariantMutation.isPending ? "Saving..." : "Save Changes"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -59,7 +59,15 @@ export function VariantSelectorDialog({ product, open, onOpenChange }: VariantSe
   });
 
   // Extract unique sizes and colors from variants
-  const availableSizes = Array.from(new Set(variants.filter(v => v.size).map(v => v.size!)));
+  const sizeOrder = ["S", "M", "L", "XL", "2XL", "3XL"];
+  const availableSizes = Array.from(new Set(variants.filter(v => v.size).map(v => v.size!))).sort((a, b) => {
+    const indexA = sizeOrder.indexOf(a.trim().toUpperCase());
+    const indexB = sizeOrder.indexOf(b.trim().toUpperCase());
+    if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+    if (indexA !== -1) return -1;
+    if (indexB !== -1) return 1;
+    return a.localeCompare(b);
+  });
   const availableColors = Array.from(new Set(variants.filter(v => v.color).map(v => v.color!)));
 
   // Find the selected variant

@@ -99,7 +99,8 @@ export default function Contact() {
 
   const banner = pageBanners?.contact;
   const bannerTitle = banner?.title || "Contact Us";
-  const bannerSubtitle = banner?.subtitle || "Get in touch with our hydroponic experts. We're here to help you grow successfully with personalized support and guidance.";
+  const bannerImage = banner?.imageUrl || "/contact-images/contact-hero.png";
+  const bannerSubtitle = banner?.subtitle || "Have questions about our collections? We’re here to help you find the perfect outfit for every occasion.";
 
   const contactInfo = [
     {
@@ -171,10 +172,10 @@ export default function Contact() {
       {/* Header */}
       <div
         className="relative text-white py-10 sm:py-12 md:py-16 overflow-hidden"
-        style={banner?.imageUrl ? { backgroundImage: `url(${banner.imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" } : {}}
+        style={bannerImage ? { backgroundImage: `url(${bannerImage})`, backgroundSize: "cover", backgroundPosition: "center" } : {}}
       >
-        {banner?.imageUrl && <div className="absolute inset-0 bg-black/55" />}
-        {!banner?.imageUrl && <div className="absolute inset-0 bg-gradient-to-r from-primary to-secondary" />}
+        {bannerImage && <div className="absolute inset-0 bg-black/55" />}
+        {!bannerImage && <div className="absolute inset-0 bg-gradient-to-r from-primary to-secondary" />}
         <div className="relative container mx-auto px-4 text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-4 sm:mb-6">{bannerTitle}</h1>
           <p className="text-lg sm:text-xl opacity-90 max-w-2xl mx-auto px-4">{bannerSubtitle}</p>
@@ -188,8 +189,7 @@ export default function Contact() {
             <div>
               <h2 className="text-xl sm:text-2xl md:text-3xl font-bold mb-4 sm:mb-6">Get in Touch</h2>
               <p className="text-muted-foreground mb-8">
-                Have questions about our products or need expert advice? 
-                Our team is ready to help you succeed with hydroponic growing.
+               Have questions about our collections? We’re here to help you find the perfect outfit for every occasion.
               </p>
             </div>
 
