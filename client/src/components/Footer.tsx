@@ -91,8 +91,8 @@ export default function Footer() {
               {[
                 { label: "Home", url: "/" },
                 { label: "Shop", url: "/products" },
-                { label: "Fresh Produce", url: "/fresh-produce" },
-                { label: "Services", url: "/services" },
+                // { label: "Fresh Produce", url: "/fresh-produce" },
+                // { label: "Services", url: "/services" },
                 { label: "About Us", url: "/about" },
                 { label: "Contact", url: "/contact" },
               ].map((link) => (
