@@ -537,14 +537,13 @@ export default function ProductVariantsManager({
               <div><Label htmlFor="compareAtPrice">Compare-at Price (₹)</Label><Input id="compareAtPrice" type="number" min="0" step="0.01" value={formData.compareAtPrice} onChange={(e) => setFormData({ ...formData, compareAtPrice: e.target.value })} /></div>
               <div><Label htmlFor="lowStockThreshold">Low Stock Threshold</Label><Input id="lowStockThreshold" type="number" min="0" value={formData.lowStockThreshold} onChange={(e) => setFormData({ ...formData, lowStockThreshold: e.target.value })} /></div>
               <div><Label htmlFor="weight">Weight</Label><Input id="weight" type="number" min="0" step="0.01" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} /></div>
-              <div><Label htmlFor="shippingCharge">Shipping Charge (₹)</Label><Input id="shippingCharge" type="number" min="0" step="0.01" value={formData.shippingCharge} onChange={(e) => setFormData({ ...formData, shippingCharge: e.target.value })} /></div>
-              <div><Label htmlFor="sortOrder">Display Order</Label><Input id="sortOrder" type="number" value={formData.sortOrder} onChange={(e) => setFormData({ ...formData, sortOrder: e.target.value })} /></div>
+              {/* Temporarily hidden: shipping charge and display order fields. Data and logic are preserved. */}
             </div>
             <div className="flex flex-wrap gap-6 text-sm">
-              <label className="flex items-center gap-2"><input type="checkbox" checked={formData.shippingChargeApplicable} onChange={(e) => setFormData({ ...formData, shippingChargeApplicable: e.target.checked })} /> Shipping charge applicable</label>
+              {/* Temporarily hidden: shipping charge applicability checkbox. Shipping logic is preserved. */}
               <label className="flex items-center gap-2"><input type="checkbox" checked={formData.isActive} onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })} /> Active variant</label>
             </div>
-            <div><Label htmlFor="variantImages">Variant Images (one URL per line)</Label><textarea id="variantImages" className="w-full min-h-20 rounded-md border bg-background px-3 py-2 text-sm" value={formData.images} onChange={(e) => setFormData({ ...formData, images: e.target.value })} placeholder="https://example.com/image-1.jpg" /></div>
+            {/* Temporarily hidden: variant images field. Existing image data and logic are preserved. */}
 
           <DialogFooter>
             <Button
@@ -584,14 +583,13 @@ export default function ProductVariantsManager({
               <div><Label htmlFor="edit-threshold">Low Stock Threshold</Label><Input id="edit-threshold" type="number" min="0" value={formData.lowStockThreshold} onChange={(e) => setFormData({ ...formData, lowStockThreshold: e.target.value })} /></div>
               <div><Label htmlFor="edit-sku">SKU</Label><Input id="edit-sku" value={formData.sku} onChange={(e) => setFormData({ ...formData, sku: e.target.value })} /></div>
               <div><Label htmlFor="edit-weight">Weight</Label><Input id="edit-weight" type="number" min="0" step="0.01" value={formData.weight} onChange={(e) => setFormData({ ...formData, weight: e.target.value })} /></div>
-              <div><Label htmlFor="edit-shipping-charge">Shipping Charge (₹)</Label><Input id="edit-shipping-charge" type="number" min="0" step="0.01" value={formData.shippingCharge} onChange={(e) => setFormData({ ...formData, shippingCharge: e.target.value })} /></div>
-              <div><Label htmlFor="edit-sort-order">Display Order</Label><Input id="edit-sort-order" type="number" value={formData.sortOrder} onChange={(e) => setFormData({ ...formData, sortOrder: e.target.value })} /></div>
+              {/* Temporarily hidden: shipping charge and display order fields. Data and logic are preserved. */}
             </div>
             <div className="flex flex-wrap gap-6 text-sm">
-              <label className="flex items-center gap-2"><input type="checkbox" checked={formData.shippingChargeApplicable} onChange={(e) => setFormData({ ...formData, shippingChargeApplicable: e.target.checked })} /> Shipping charge applicable</label>
+              {/* Temporarily hidden: shipping charge applicability checkbox. Shipping logic is preserved. */}
               <label className="flex items-center gap-2"><input type="checkbox" checked={formData.isActive} onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })} /> Active variant</label>
             </div>
-            <div><Label htmlFor="edit-images">Variant Images (one URL per line)</Label><textarea id="edit-images" className="w-full min-h-24 rounded-md border bg-background px-3 py-2 text-sm" value={formData.images} onChange={(e) => setFormData({ ...formData, images: e.target.value })} placeholder="https://example.com/image-1.jpg" /></div>
+            {/* Temporarily hidden: variant images field. Existing image data and logic are preserved. */}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setEditingVariant(null)}>Cancel</Button>

@@ -2056,6 +2056,10 @@ export const adminOrderDetailSchema = z.object({
   subtotal: z.number(),
   shippingCost: z.number(),
   taxAmount: z.number(),
+  // Discount amounts saved on the order and returned to the admin order-details view
+  couponDiscount: z.number().optional(),
+  couponDiscountPercentage: z.number().optional(),
+  giftCardDiscount: z.number().optional(),
   total: z.number(),
   status: z.string(),
   paymentStatus: z.string(),

@@ -124,8 +124,8 @@ export default function Contact() {
     {
       icon: Clock,
       title: "Business Hours",
-      detail: settingsContact?.businessHours || "Mon - Sat: 9:00 AM - 6:00 PM",
-      description: "Sunday: Closed"
+      detail: settingsContact?.businessHours || "Sun - Sat: 10:00 AM - 09:30 PM",
+      description: "We're available to assist you during these hours"
     }
   ];
 

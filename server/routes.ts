@@ -2820,60 +2820,629 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // GST-friendly invoice. It is intentionally HTML/print-ready so it works without adding a PDF runtime dependency.
-  app.get('/api/orders/:id/invoice', authenticateToken, async (req, res) => {
-    try {
-      const authReq = req as AuthenticatedRequest;
-      const order = await storage.getOrderWithItems(req.params.id);
-      if (!order) return res.status(404).json({ error: 'Order not found' });
-      if (order.userId !== authReq.user.id && authReq.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-      const invoiceNumber = order.invoiceNumber || `BMAA-${new Date(order.createdAt || Date.now()).getFullYear()}-${order.id.slice(-8).toUpperCase()}`;
-      if (!order.invoiceNumber) await db.update(ordersTable).set({ invoiceNumber }).where(eq(ordersTable.id, order.id));
-      const businessName = process.env.BUSINESS_NAME || 'BMAA FASHION';
-      const returnAddress = process.env.BUSINESS_ADDRESS || "Women's Boutique,\n32, MTH Road,\nAmbattur,\nChennai - 600053";
-      const carrierCode = process.env.SHIPPING_CARRIER_CODE || 'MAA-MDS';
-      // Both barcodes are real Code 39 symbols generated from the order's identifiers.
-      // The AWB barcode uses the actual tracking number when supplied; otherwise it is derived from this order ID.
-      const awb = String(order.trackingNumber || `BMAA${order.id.replace(/[^a-z0-9]/gi, '').slice(-10).toUpperCase()}`);
-      const orderCode = `BF-${new Date(order.createdAt || Date.now()).getFullYear()}-${order.id.replace(/[^a-z0-9]/gi, '').slice(-5).toUpperCase()}`;
-      const code39Patterns: Record<string, string> = {
-        '0':'nnnwwnwnn','1':'wnnwnnnnw','2':'nnwwnnnnw','3':'wnwwnnnnn','4':'nnnwwnnnw',
-        '5':'wnnwwnnnn','6':'nnwwwnnnn','7':'nnnwnnwnw','8':'wnnwnnwnn','9':'nnwwnnwnn',
-        'A':'wnnnnwnnw','B':'nnwnnwnnw','C':'wnwnnwnnn','D':'nnnnwwnnw','E':'wnnnwwnnn',
-        'F':'nnwnwwnnn','G':'nnnnnwwnw','H':'wnnnnwwnn','I':'nnwnnwwnn','J':'nnnnwwwnn',
-        'K':'wnnnnnnww','L':'nnwnnnnww','M':'wnwnnnnwn','N':'nnnnwnnww','O':'wnnnwnnwn',
-        'P':'nnwnwnnwn','Q':'nnnnnnwww','R':'wnnnnnwwn','S':'nnwnnnwwn','T':'nnnnwnwwn',
-        'U':'wwnnnnnnw','V':'nwwnnnnnw','W':'wwwnnnnnn','X':'nwnnwnnwn','Y':'wwnnwnnnn',
-        'Z':'nwwnwnnnn','-':'nwnnnnwnw','.':'wwnnnnwnn',' ':'nwwnnnwnn','$':'nwnwnwnnn',
-        '/':'nwnwnnnwn','+':'nwnnnwnwn','%':'nnnwnwnwn','*':'nwnnwnwnn'
-      };
-      const barcodeMarkup = (value: string) => {
-        const normalized = String(value || '').toUpperCase().replace(/[^0-9A-Z. $/+%_-]/g, '-');
-        const encoded = `*${normalized || 'ORDER'}*`;
-        let x = 10;
-        const bars: string[] = [];
-        for (let charIndex = 0; charIndex < encoded.length; charIndex++) {
-          const pattern = code39Patterns[encoded[charIndex]] || code39Patterns['-'];
-          for (let i = 0; i < pattern.length; i++) {
-            const width = pattern[i] === 'w' ? 3 : 1;
-            if (i % 2 === 0) bars.push(`<rect x="${x}" y="0" width="${width}" height="50"/>`);
-            x += width;
+app.get('/api/orders/:id/invoice', authenticateToken, async (req, res) => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const order = await storage.getOrderWithItems(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    if (
+      order.userId !== authReq.user.id &&
+      authReq.user.role !== 'admin'
+    ) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const invoiceNumber =
+      order.invoiceNumber ||
+      `BMAA-${new Date(order.createdAt || Date.now()).getFullYear()}-${order.id
+        .slice(-8)
+        .toUpperCase()}`;
+
+    if (!order.invoiceNumber) {
+      await db
+        .update(ordersTable)
+        .set({ invoiceNumber })
+        .where(eq(ordersTable.id, order.id));
+    }
+
+    const businessName = process.env.BUSINESS_NAME || 'BMAA FASHION';
+
+    const returnAddress =
+      process.env.BUSINESS_ADDRESS ||
+      "Women's Boutique,\n32, MTH Road,\nAmbattur,\nChennai - 600053";
+
+    const carrierCode = process.env.SHIPPING_CARRIER_CODE || 'MAA-MDS';
+
+    const orderCode = `BF-${new Date(
+      order.createdAt || Date.now()
+    ).getFullYear()}-${order.id
+      .replace(/[^a-z0-9]/gi, '')
+      .slice(-5)
+      .toUpperCase()}`;
+
+    // Use the coupon discount saved with the order.
+    const couponDiscount = Math.max(
+      0,
+      Number(order.couponDiscount || 0)
+    );
+    console.log(`💰 Coupon discount for order ${order.id}: ₹${couponDiscount.toFixed(2)}`);
+    const subtotal = Number(order.subtotal || 0);
+    const shippingCost = Number(order.shippingCost || 0);
+    const taxAmount = Number(order.taxAmount || 0);
+    const totalAmount = Number(order.total || 0);
+
+    const couponDiscountPercentage =
+      subtotal > 0
+        ? ((couponDiscount / subtotal) * 100)
+            .toFixed(2)
+            .replace(/\.00$/, '')
+        : '0';
+
+    const code39Patterns: Record<string, string> = {
+      '0': 'nnnwwnwnn',
+      '1': 'wnnwnnnnw',
+      '2': 'nnwwnnnnw',
+      '3': 'wnwwnnnnn',
+      '4': 'nnnwwnnnw',
+      '5': 'wnnwwnnnn',
+      '6': 'nnwwwnnnn',
+      '7': 'nnnwnnwnw',
+      '8': 'wnnwnnwnn',
+      '9': 'nnwwnnwnn',
+      A: 'wnnnnwnnw',
+      B: 'nnwnnwnnw',
+      C: 'wnwnnwnnn',
+      D: 'nnnnwwnnw',
+      E: 'wnnnwwnnn',
+      F: 'nnwnwwnnn',
+      G: 'nnnnnwwnw',
+      H: 'wnnnnwwnn',
+      I: 'nnwnnwwnn',
+      J: 'nnnnwwwnn',
+      K: 'wnnnnnnww',
+      L: 'nnwnnnnww',
+      M: 'wnwnnnnwn',
+      N: 'nnnnwnnww',
+      O: 'wnnnwnnwn',
+      P: 'nnwnwnnwn',
+      Q: 'nnnnnnwww',
+      R: 'wnnnnnwwn',
+      S: 'nnwnnnwwn',
+      T: 'nnnnwnwwn',
+      U: 'wwnnnnnnw',
+      V: 'nwwnnnnnw',
+      W: 'wwwnnnnnn',
+      X: 'nwnnwnnwn',
+      Y: 'wwnnwnnnn',
+      Z: 'nwwnwnnnn',
+      '-': 'nwnnnnwnw',
+      '.': 'wwnnnnwnn',
+      ' ': 'nwwnnnwnn',
+      '$': 'nwnwnwnnn',
+      '/': 'nwnwnnnwn',
+      '+': 'nwnnnwnwn',
+      '%': 'nnnwnwnwn',
+      '*': 'nwnnwnwnn',
+    };
+
+    const barcodeMarkup = (value: string) => {
+      const normalized = String(value || '')
+        .toUpperCase()
+        .replace(/[^0-9A-Z. $/+%_-]/g, '-');
+
+      const encoded = `*${normalized || 'ORDER'}*`;
+      let x = 10;
+      const bars: string[] = [];
+
+      for (let charIndex = 0; charIndex < encoded.length; charIndex++) {
+        const pattern =
+          code39Patterns[encoded[charIndex]] || code39Patterns['-'];
+
+        for (let i = 0; i < pattern.length; i++) {
+          const width = pattern[i] === 'w' ? 3 : 1;
+
+          if (i % 2 === 0) {
+            bars.push(
+              `<rect x="${x}" y="0" width="${width}" height="50"/>`
+            );
           }
-          if (charIndex < encoded.length - 1) x += 1;
+
+          x += width;
         }
-        const svgWidth = x + 10;
-        return `<svg class="barcode" role="img" aria-label="Code 39 barcode for ${escapeHtml(normalized)}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgWidth} 50" preserveAspectRatio="none"><rect width="100%" height="100%" fill="#fff"/>${bars.join('')}</svg>`;
-      };
-      const addressLines = String(order.shippingAddress || '').split(/\r?\n/).map((line: string) => line.trim()).filter(Boolean);
-      const recipient = addressLines.shift() || order.customerName || '-';
-      const shippingAddressHTML = [recipient, ...addressLines.filter((line: string) => !/^phone\s*:/i.test(line))]
-        .map((line: string) => `<div>${escapeHtml(line)}</div>`).join('');
-      const itemRows = (order.items || []).map((item: any, index: number) => `<tr><td>${index + 1}. ${escapeHtml(item.productName || 'Product')}${item.color ? ` (${escapeHtml(item.color)} Color)` : ''}</td><td>${escapeHtml(item.size || '-')}</td><td>${Number(item.quantity || 0)}</td><td>₹${Number(item.totalPrice ?? Number(item.productPrice || 0) * Number(item.quantity || 0)).toFixed(2)}</td></tr>`).join('');
-      const invoiceHTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(orderCode)} - BMAA Fashion</title><style>
-        @page{size:4in 6in;margin:0}*{box-sizing:border-box}html,body{width:4in;min-height:6in;margin:0;padding:0;background:#fff;color:#111;font-family:Arial,Helvetica,sans-serif}body{font-size:9px}.label{width:4in;min-height:6in;border:1.2px solid #111;display:flex;flex-direction:column}.section{border-bottom:1px solid #111;padding:7px 9px}.brand{display:grid;grid-template-columns:63% 37%;min-height:58px}.brand-left{border-right:1px solid #111;padding:8px}.brand-name{font-size:17px;font-weight:800;letter-spacing:.2px;margin:0 0 5px}.subtitle{font-size:10px}.carrier{display:flex;align-items:center;justify-content:center;text-align:center;font-size:17px;font-weight:800;padding:5px}.awb{text-align:center;padding:9px 10px 10px}.barcode{height:44px;width:100%;display:block;overflow:hidden;margin:0 auto 6px;fill:#111}.awb-text{font-size:13px;font-weight:800}.addresses{display:grid;grid-template-columns:1fr 1fr;min-height:124px;padding:0}.address{padding:8px 9px;min-width:0;overflow-wrap:anywhere;line-height:1.45;font-size:10px}.address:first-child{border-right:1px solid #111}.address-title{font-size:12px;font-weight:800;white-space:nowrap;margin:0 0 5px}.address strong{font-size:12px;display:block;margin-bottom:1px}.pin{font-size:12px;font-weight:800}.order-code{text-align:center;padding:9px 10px 4px}.order-code .barcode{height:35px;width:82%;margin-bottom:5px}.order-id{font-size:10px}.items{padding:3px 8px 8px;flex:1}.items table{width:100%;border-collapse:collapse;table-layout:fixed}.items th{font-size:12px;text-align:left;padding:5px 1px 7px;border-bottom:1px solid #111}.items td{font-size:9px;padding:8px 1px;vertical-align:top;overflow-wrap:anywhere}.items th:first-child,.items td:first-child{width:58%}.items th:nth-child(2),.items td:nth-child(2){width:15%;text-align:center}.items th:nth-child(3),.items td:nth-child(3){width:10%;text-align:center}.items th:nth-child(4),.items td:nth-child(4){width:17%;text-align:right}.totals{display:grid;grid-template-columns:60% 40%;min-height:89px;border-top:1px solid #111;padding:9px}.invoice-meta{font-size:9px;line-height:1.8;overflow-wrap:anywhere}.payment{font-size:12px;font-weight:800;line-height:1.35;margin-top:2px}.grand{align-self:center;font-size:13px;font-weight:800;overflow-wrap:anywhere}.grand strong{display:block;font-size:17px;margin-top:5px}.footer{margin-top:auto;min-height:52px;border-top:1px solid #111;display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:800;padding:8px;overflow-wrap:anywhere}.print-controls{padding:8px;text-align:center}.print{font:600 12px Arial;padding:8px 14px;cursor:pointer}@media screen{body{padding:12px;background:#eee}.label{margin:0 auto;background:white;box-shadow:0 1px 8px #bbb}}@media print{html,body{width:4in;height:6in;min-height:6in;margin:0;padding:0}.label{width:4in;height:6in;min-height:6in;page-break-after:avoid;break-after:avoid}.print-controls{display:none}}
-      </style></head><body><main class="label"><header class="section brand"><div class="brand-left"><h1 class="brand-name">${escapeHtml(businessName)}</h1><div class="subtitle">Online Store Order</div></div><div class="carrier">${escapeHtml(carrierCode)}</div></header><section class="section awb">${barcodeMarkup(orderCode)}<div class="awb-text">ORDER ID: ${escapeHtml(orderCode)}</div></section><section class="section addresses"><div class="address"><h2 class="address-title">SHIPPING ADDRESS (TO):</h2><strong>${escapeHtml(recipient)}</strong>${shippingAddressHTML.replace(`<div>${escapeHtml(recipient)}</div>`, '')}${order.customerPhone ? `<div><b>Phone: ${escapeHtml(order.customerPhone)}</b></div>` : ''}</div><div class="address"><h2 class="address-title">RETURN ADDRESS (FROM):</h2>${returnAddress.split(/\r?\n|,/).map((line: string) => line.trim()).filter(Boolean).map((line: string, index: number) => index === 0 ? `<strong>${escapeHtml(line)}</strong>` : `<div>${escapeHtml(line)}</div>`).join('')}</div></section></section><section class="items"><table><thead><tr><th>Product Description</th><th>Size</th><th>Qty</th><th>Price</th></tr></thead><tbody>${itemRows}</tbody></table></section><section class="totals"><div class="invoice-meta"><div>Invoice No: ${escapeHtml(invoiceNumber)}</div><div>Date: ${new Date(order.createdAt || Date.now()).toLocaleDateString('en-GB')}</div><div class="payment">Payment Mode: ${escapeHtml(String(order.paymentStatus || '').toLowerCase() === 'completed' ? 'PREPAID (Online)' : String(order.paymentMethod || 'COD').toUpperCase())}</div></div><div class="grand">TOTAL AMOUNT:<strong>₹${Number(order.total || 0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></div></section><footer class="footer">*** POWERED BY BMAA FASHION ***</footer><div class="print-controls"><button class="print" onclick="window.print()">Print 4×6 Bill</button></div></main></body></html>`;
-      res.type('html').send(invoiceHTML);
-    } catch (error) { console.error('Invoice generation failed:', error); res.status(500).json({ error: 'Failed to generate invoice' }); }
-  });
+
+        if (charIndex < encoded.length - 1) {
+          x += 1;
+        }
+      }
+
+      const svgWidth = x + 10;
+
+      return `<svg class="barcode" role="img"
+        aria-label="Code 39 barcode for ${escapeHtml(normalized)}"
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 ${svgWidth} 50"
+        preserveAspectRatio="none">
+        <rect width="100%" height="100%" fill="#fff"/>
+        ${bars.join('')}
+      </svg>`;
+    };
+
+    const addressLines = String(order.shippingAddress || '')
+      .split(/\r?\n/)
+      .map((line: string) => line.trim())
+      .filter(Boolean);
+
+    const recipient = addressLines.shift() || order.customerName || '-';
+
+    const shippingAddressHTML = addressLines
+      .filter((line: string) => !/^phone\s*:/i.test(line))
+      .map((line: string) => `<div>${escapeHtml(line)}</div>`)
+      .join('');
+
+    const itemRows = (order.items || [])
+      .map((item: any, index: number) => {
+        const quantity = Number(item.quantity || 0);
+        const lineTotal = Number(
+          item.totalPrice ??
+            Number(item.productPrice || 0) * quantity
+        );
+
+        return `
+          <tr>
+            <td>
+              ${index + 1}. ${escapeHtml(item.productName || 'Product')}
+              ${item.color ? ` (${escapeHtml(item.color)} Color)` : ''}
+            </td>
+            <td>${escapeHtml(item.size || '-')}</td>
+            <td>${quantity}</td>
+            <td>₹${lineTotal.toFixed(2)}</td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    const invoiceHTML = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>${escapeHtml(orderCode)} - BMAA Fashion</title>
+
+  <style>
+    @page {
+      size: 4in 6in;
+      margin: 0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 4in;
+      min-height: 6in;
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      color: #111;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .label {
+      width: 4in;
+      min-height: 6in;
+      border: 1.2px solid #111;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .section {
+      border-bottom: 1px solid #111;
+      padding: 7px 9px;
+    }
+
+    .brand {
+      display: grid;
+      grid-template-columns: 63% 37%;
+      min-height: 58px;
+    }
+
+    .brand-left {
+      border-right: 1px solid #111;
+      padding: 8px;
+    }
+
+    .brand-name {
+      font-size: 19px;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      margin: 0 0 5px;
+    }
+
+    .subtitle {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .carrier {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 17px;
+      font-weight: 800;
+      padding: 5px;
+    }
+
+    .awb {
+      text-align: center;
+      padding: 9px 10px;
+    }
+
+    .barcode {
+      height: 44px;
+      width: 100%;
+      display: block;
+      overflow: hidden;
+      margin: 0 auto 6px;
+      fill: #111;
+    }
+
+    .awb-text {
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .addresses {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      min-height: 124px;
+      padding: 0;
+    }
+
+    .address {
+      padding: 8px 9px;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      line-height: 1.5;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .address:first-child {
+      border-right: 1px solid #111;
+    }
+
+    .address-title {
+      font-size: 12px;
+      font-weight: 800;
+      margin: 0 0 5px;
+    }
+
+    .address strong {
+      font-size: 13px;
+      font-weight: 800;
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .items {
+      padding: 3px 8px 8px;
+      flex: 1;
+    }
+
+    .items table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    .items th {
+      font-size: 12px;
+      font-weight: 800;
+      text-align: left;
+      padding: 5px 1px 7px;
+      border-bottom: 1px solid #111;
+    }
+
+    .items td {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 9px 2px;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+
+    .items th:first-child,
+    .items td:first-child {
+      width: 58%;
+    }
+
+    .items th:nth-child(2),
+    .items td:nth-child(2) {
+      width: 15%;
+      text-align: center;
+    }
+
+    .items th:nth-child(3),
+    .items td:nth-child(3) {
+      width: 10%;
+      text-align: center;
+    }
+
+    .items th:nth-child(4),
+    .items td:nth-child(4) {
+      width: 17%;
+      text-align: right;
+    }
+
+    .totals {
+      display: grid;
+      grid-template-columns: 54% 46%;
+      gap: 4px;
+      border-top: 1px solid #111;
+      padding: 8px;
+    }
+
+    .invoice-meta {
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.8;
+      overflow-wrap: anywhere;
+    }
+
+    .payment {
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1.4;
+      margin-top: 3px;
+    }
+
+    .grand {
+      align-self: center;
+      font-size: 11px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+      line-height: 1.5;
+    }
+
+    .grand .amount {
+      font-size: 13px;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+
+    .coupon-discount {
+      color: #16803c;
+      font-size: 10px;
+      font-weight: 800;
+      margin: 4px 0;
+    }
+
+    .total-label {
+      font-size: 11px;
+      font-weight: 800;
+      margin-top: 5px;
+    }
+
+    .grand .final-amount {
+      display: block;
+      font-size: 16px;
+      font-weight: 800;
+      margin-top: 3px;
+    }
+
+    .footer {
+      margin-top: auto;
+      min-height: 52px;
+      border-top: 1px solid #111;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 800;
+      padding: 8px;
+      overflow-wrap: anywhere;
+    }
+
+    .print-controls {
+      padding: 8px;
+      text-align: center;
+    }
+
+    .print {
+      font: 700 12px Arial, sans-serif;
+      padding: 8px 14px;
+      cursor: pointer;
+    }
+
+    @media screen {
+      body {
+        padding: 12px;
+        background: #eee;
+      }
+
+      .label {
+        margin: 0 auto;
+        background: #fff;
+        box-shadow: 0 1px 8px #bbb;
+      }
+    }
+
+    @media print {
+      html,
+      body {
+        width: 4in;
+        height: 6in;
+        min-height: 6in;
+        margin: 0;
+        padding: 0;
+      }
+
+      .label {
+        width: 4in;
+        height: 6in;
+        min-height: 6in;
+        page-break-after: avoid;
+        break-after: avoid;
+      }
+
+      .print-controls {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="label">
+    <header class="section brand">
+      <div class="brand-left">
+        <h1 class="brand-name">${escapeHtml(businessName)}</h1>
+        <div class="subtitle">Online Store Order</div>
+      </div>
+      <div class="carrier">${escapeHtml(carrierCode)}</div>
+    </header>
+
+    <section class="section awb">
+      ${barcodeMarkup(orderCode)}
+      <div class="awb-text">ORDER ID: ${escapeHtml(orderCode)}</div>
+    </section>
+
+    <section class="section addresses">
+      <div class="address">
+        <h2 class="address-title">SHIPPING ADDRESS (TO):</h2>
+        <strong>${escapeHtml(recipient)}</strong>
+        ${shippingAddressHTML}
+        ${
+          order.customerPhone
+            ? `<div><b>Phone: ${escapeHtml(order.customerPhone)}</b></div>`
+            : ''
+        }
+      </div>
+
+      <div class="address">
+        <h2 class="address-title">RETURN ADDRESS (FROM):</h2>
+        ${returnAddress
+          .split(/\r?\n|,/)
+          .map((line: string) => line.trim())
+          .filter(Boolean)
+          .map((line: string, index: number) =>
+            index === 0
+              ? `<strong>${escapeHtml(line)}</strong>`
+              : `<div>${escapeHtml(line)}</div>`
+          )
+          .join('')}
+      </div>
+    </section>
+
+    <section class="items">
+      <table>
+        <thead>
+          <tr>
+            <th>Product Description</th>
+            <th>Size</th>
+            <th>Qty</th>
+            <th>Price</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemRows}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="totals">
+      <div class="invoice-meta">
+        <div>Invoice No: ${escapeHtml(invoiceNumber)}</div>
+        <div>
+          Date: ${new Date(
+            order.createdAt || Date.now()
+          ).toLocaleDateString('en-GB')}
+        </div>
+        <div class="payment">
+          Payment Mode:
+          ${escapeHtml(
+            String(order.paymentStatus || '').toLowerCase() === 'completed'
+              ? 'PREPAID (Online)'
+              : String(order.paymentMethod || 'COD').toUpperCase()
+          )}
+        </div>
+      </div>
+
+      <div class="grand">
+        <div>SUBTOTAL</div>
+        <div class="amount">
+          ₹${subtotal.toLocaleString('en-IN', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+          })}
+        </div>
+
+        ${
+          couponDiscount > 0
+            ? `<div class="coupon-discount">
+                 <div>COUPON DISCOUNT (${couponDiscountPercentage}%)</div>
+                 <div>-₹${couponDiscount.toLocaleString('en-IN', {
+                   minimumFractionDigits: 2,
+                   maximumFractionDigits: 2
+                 })}</div>
+               </div>`
+            : ''
+        }
+
+        ${
+          shippingCost > 0
+            ? `<div>SHIPPING: ₹${shippingCost.toFixed(2)}</div>`
+            : ''
+        }
+
+        ${
+          taxAmount > 0
+            ? `<div>TAX: ₹${taxAmount.toFixed(2)}</div>`
+            : ''
+        }
+
+        <div class="total-label">TOTAL AMOUNT</div>
+        <strong class="final-amount">
+          ₹${totalAmount.toLocaleString('en-IN', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+          })}
+        </strong>
+      </div>
+    </section>
+
+    <footer class="footer">
+      *** POWERED BY BMAA FASHION ***
+    </footer>
+
+    <div class="print-controls">
+      <button class="print" onclick="window.print()">
+        Print 4×6 Bill
+      </button>
+    </div>
+  </main>
+</body>
+</html>`;
+
+    res.type('html').send(invoiceHTML);
+  } catch (error) {
+    console.error('Invoice generation failed:', error);
+    res.status(500).json({ error: 'Failed to generate invoice' });
+  }
+});
 
   // Generate and download receipt for an order
   app.get('/api/orders/:id/receipt', authenticateToken, async (req, res) => {

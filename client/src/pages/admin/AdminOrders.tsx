@@ -1336,33 +1336,72 @@ function AdminOrdersContent() {
                 </Card>
 
                 {/* Order Totals */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center">
-                      <IndianRupee className="h-5 w-5 mr-2" />
-                      Order Totals
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    <div className="flex justify-between">
-                      <span>Subtotal</span>
-                      <span>₹{selectedOrder.subtotal.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Shipping</span>
-                      <span>₹{selectedOrder.shippingCost.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Tax</span>
-                      <span>₹{selectedOrder.taxAmount.toLocaleString()}</span>
-                    </div>
-                    <Separator />
-                    <div className="flex justify-between font-semibold text-lg">
-                      <span>Total</span>
-                      <span>₹{selectedOrder.total.toLocaleString()}</span>
-                    </div>
-                  </CardContent>
-                </Card>
+             <Card>
+  <CardHeader>
+    <CardTitle className="text-lg flex items-center">
+      <IndianRupee className="h-5 w-5 mr-2" />
+      Order Totals
+    </CardTitle>
+  </CardHeader>
+
+  <CardContent className="space-y-3">
+    <div className="flex justify-between">
+      <span>Subtotal</span>
+      <span>
+        ₹{Number(selectedOrder.subtotal || 0).toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}
+      </span>
+    </div>
+
+    <div className="flex justify-between font-semibold text-green-700">
+      <span>Coupon Discount </span>
+      <span>
+        -₹{Number(
+          (selectedOrder as any).couponDiscount ??
+          (selectedOrder as any).discountAmount ??
+          0
+        ).toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}
+      </span>
+    </div>
+
+    <div className="flex justify-between">
+      <span>Shipping</span>
+      <span>
+        ₹{Number(selectedOrder.shippingCost || 0).toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}
+      </span>
+    </div>
+
+    <div className="flex justify-between">
+      <span>Tax</span>
+      <span>
+        ₹{Number(selectedOrder.taxAmount || 0).toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}
+      </span>
+    </div>
+
+    <Separator />
+
+    <div className="flex justify-between font-bold text-lg">
+      <span>Total</span>
+      <span>
+        ₹{Number(selectedOrder.total || 0).toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}
+      </span>
+    </div>
+  </CardContent>
+</Card>
 
                 {/* Action Buttons */}
                 <div className="flex justify-end space-x-2">

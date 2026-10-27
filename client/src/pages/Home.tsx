@@ -20,7 +20,7 @@ import {
   Lock,
 } from "lucide-react";
 import { SiWhatsapp } from "react-icons/si";
-
+import StorePriceDisplay from "@/components/StorePriceDisplay";
 // Homepage testimonials are loaded from approved product reviews in the database.
 // No sample or hardcoded customer testimonials are shown.
 
@@ -361,7 +361,12 @@ export default function Home() {
                       </h3>
                       <div className="flex items-center justify-between">
                         <span className="text-lg md:text-xl font-bold text-gray-900">
-                          ₹{product.price}
+                          <StorePriceDisplay
+                            price={product.price}
+                            className="text-lg md:text-xl font-bold text-gray-900"
+                            originalClassName="text-xs text-gray-500 line-through"
+                            discountClassName="text-xs font-semibold text-green-600"
+                          />
                         </span>
                         {product.size && (
                           <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">

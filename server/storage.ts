@@ -2579,6 +2579,11 @@ export class DatabaseStorage implements IStorage {
       subtotal: parseFloat(order.subtotal),
       shippingCost: parseFloat(order.shippingCost || '0'),
       taxAmount: parseFloat(order.taxAmount || '0'),
+      couponDiscount: parseFloat(order.couponDiscount || '0'),
+      couponDiscountPercentage: parseFloat(order.subtotal) > 0
+        ? Number(((parseFloat(order.couponDiscount || '0') / parseFloat(order.subtotal)) * 100).toFixed(2))
+        : 0,
+      giftCardDiscount: parseFloat(order.giftCardDiscount || '0'),
       total: parseFloat(order.total),
       status: order.status,
       paymentStatus: order.paymentStatus || 'pending',

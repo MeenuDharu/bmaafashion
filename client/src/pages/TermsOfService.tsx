@@ -1,104 +1,172 @@
+
 import { useMemo } from "react";
 import { useSEO } from "@/hooks/use-seo";
 import { ORGANIZATION_DATA, generateBreadcrumbs } from "@/lib/structured-data-constants";
 
 export default function TermsOfService() {
-  const tosStructuredData = useMemo(() => [
-    ORGANIZATION_DATA,
-    generateBreadcrumbs([
-      { name: "Home", url: "/" },
-      { name: "Terms of Service", url: "/terms-of-service" },
-    ]),
-  ], []);
+  const tosStructuredData = useMemo(
+    () => [
+      ORGANIZATION_DATA,
+      generateBreadcrumbs([
+        { name: "Home", url: "/" },
+        { name: "Terms and Conditions", url: "/terms-of-service" },
+      ]),
+    ],
+    []
+  );
 
   useSEO({
-    title: "Terms of Service | Bmaa Fashion",
-    description: "Read the terms, ordering conditions, and shipping policy for Bmaa Fashion.",
-    ogTitle: "Terms of Service | Bmaa Fashion",
-    ogDescription: "Understand the terms that apply when you shop with Bmaa Fashion.",
+    title: "Terms and Conditions | Bmaa Fashion",
+    description:
+      "Read the Terms and Conditions for using the Bmaa Fashion website.",
+    ogTitle: "Terms and Conditions | Bmaa Fashion",
+    ogDescription:
+      "Understand the terms and conditions that apply when using the Bmaa Fashion website.",
     ogImage: "/attached_assets/bmaafashion.jpeg",
     structuredData: tosStructuredData,
   });
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-12">
-      <h1 className="mb-3 text-4xl font-bold" data-testid="heading-terms-of-service">
-        Terms of Service <span className="block mt-2 text-2xl font-semibold">சேவை விதிமுறைகள்</span>
+      <h1
+        className="mb-3 text-4xl font-bold"
+        data-testid="heading-terms-of-service"
+      >
+        Terms and Conditions
       </h1>
 
       <div className="prose prose-green max-w-none space-y-6">
-        <p className="text-muted-foreground"><strong>Effective Date:</strong> September 7, 2026</p>
         <p>
-          Welcome to <strong>Bmaa Fashion</strong>. By accessing our website or placing an order, you agree to these Terms of Service and our Privacy Policy. Please read them before shopping with us.
+          By accessing or using our website at{" "}
+          <a
+            href="https://www.bmaafashion.com"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            https://www.bmaafashion.com
+          </a>
+          , you agree to be bound by these Terms and Conditions and all
+          applicable laws and regulations. If you do not agree with any part
+          of these terms, please do not use our website.
         </p>
 
         <section className="space-y-4">
-          <h2 className="mt-8 text-2xl font-semibold">1. Eligibility and Use of Our Website</h2>
-          <p>By placing an order, you confirm that you are at least 18 years old, or that you are using the website with the supervision and consent of a parent or legal guardian. You agree to use our website only for lawful purposes and to provide accurate information when placing an order.</p>
-        </section>
-
-        <section className="space-y-4">
-          <h2 className="mt-8 text-2xl font-semibold">2. Product Information and Availability</h2>
+          <h2 className="mt-8 text-2xl font-semibold">
+            1. Use of Website
+          </h2>
           <p>
-            We make every effort to display our dresses, fabrics, colours, sizes, and styles accurately. Colours may appear slightly different depending on your device, screen settings, lighting, or the nature of the fabric. Product availability is subject to change, and we may limit quantities or discontinue an item at any time.
+            You may browse our website and submit comments or inquiries where
+            applicable. You agree not to use the website for any unlawful,
+            illegal, or prohibited activity.
           </p>
         </section>
 
         <section className="space-y-4">
-          <h2 className="mt-8 text-2xl font-semibold">3. Pricing and Payment</h2>
+          <h2 className="mt-8 text-2xl font-semibold">
+            2. Comments and User-Generated Content
+          </h2>
           <p>
-            Prices are displayed in Indian Rupees (INR), unless stated otherwise. Prices, offers, and availability may change without notice. The final payable amount, including applicable delivery charges and taxes where applicable, will be shown at checkout. You must provide accurate payment information and be authorised to use the selected payment method.
+            When you leave comments on our website, we collect the data shown
+            in the comments form, along with your IP address and browser user
+            agent string to help detect spam. Approved comments may be visible
+            to the public along with your profile image if you use the Gravatar
+            service.
           </p>
         </section>
 
         <section className="space-y-4">
-          <h2 className="mt-8 text-2xl font-semibold">4. Orders and Acceptance</h2>
+          <h2 className="mt-8 text-2xl font-semibold">
+            3. Intellectual Property
+          </h2>
           <p>
-            An order confirmation acknowledges that we have received your order; it does not mean that the order has been accepted. We may refuse, cancel, or limit an order if an item is unavailable, there is an error in the price or product information, payment cannot be verified, or fraud or misuse is suspected. If payment has already been made for a cancelled order, we will arrange a refund in accordance with the applicable payment process.
+            All content on this website, including text, images, logos,
+            graphics, and design elements, is the exclusive property of
+            Blacklovers unless otherwise stated. Any reproduction, duplication,
+            copying, or redistribution of content without prior written
+            permission is strictly prohibited.
           </p>
         </section>
 
         <section className="space-y-4">
-          <h2 className="mt-8 text-2xl font-semibold">5. Shipping Policy <span className="text-lg font-medium">ஷிப்பிங் கொள்கை</span></h2>
-          <p>Thank you for shopping with Bmaa Fashion. The following shipping terms apply to your order:</p>
-          <ul className="list-disc space-y-2 pl-6">
-            <li><strong>Processing time:</strong> Orders are generally processed within 1–3 business days. Orders are not processed or dispatched on weekends or public holidays.</li>
-            <li><strong>Shipping charges and estimates:</strong> Shipping charges are calculated and shown at checkout. Standard delivery generally takes 5–7 business days after dispatch, depending on your location and the delivery partner.</li>
-            <li><strong>Delays:</strong> Delivery estimates are not guaranteed. Weather, holidays, courier capacity, or circumstances outside our control may cause delays.</li>
-            <li><strong>Tracking:</strong> Once your order is dispatched, we will send a shipment confirmation with tracking details when they are available.</li>
-            <li><strong>Incorrect address:</strong> Please check your delivery address carefully. Bmaa Fashion cannot be responsible for delays or losses caused by an incomplete or incorrect address supplied at checkout.</li>
-            <li><strong>Damaged deliveries:</strong> If your parcel or product arrives damaged, contact us promptly with clear photos of the package and item so we can assist you.</li>
-          </ul>
+          <h2 className="mt-8 text-2xl font-semibold">
+            4. Media Uploads
+          </h2>
+          <p>
+            If you upload images to the website, you should avoid uploading
+            images with embedded location data (EXIF GPS). Visitors to the
+            website can download and extract location data from such images.
+          </p>
         </section>
 
         <section className="space-y-4">
-          <h2 className="mt-8 text-2xl font-semibold">6. Returns and Refunds</h2>
-          <p>Returns, exchanges, and refunds are governed by our applicable Return Policy. Please review that policy and the product details before placing an order, as eligibility may vary by product.</p>
+          <h2 className="mt-8 text-2xl font-semibold">
+            5. Third-Party Content
+          </h2>
+          <p>
+            This website may include embedded content such as videos, images,
+            or articles from third-party websites. Embedded content from other
+            websites behaves in the same way as if the visitor has visited the
+            other website directly. These third-party websites may collect
+            data about you, use cookies, embed additional third-party
+            tracking, and monitor your interaction with that embedded
+            content.
+          </p>
         </section>
 
         <section className="space-y-4">
-          <h2 className="mt-8 text-2xl font-semibold">7. Intellectual Property</h2>
-          <p>All website content, including images, product descriptions, designs, logos, text, and graphics, belongs to Bmaa Fashion or its licensors. You may not copy, reproduce, distribute, or use this content without our prior written permission.</p>
+          <h2 className="mt-8 text-2xl font-semibold">
+            6. Account Responsibilities
+          </h2>
+          <p>
+            If you create an account on our website, you are responsible for
+            maintaining the confidentiality of your account credentials and
+            for all activities that occur under your account.
+          </p>
         </section>
 
         <section className="space-y-4">
-          <h2 className="mt-8 text-2xl font-semibold">8. Limitation of Liability</h2>
-          <p>To the extent permitted by law, Bmaa Fashion will not be liable for indirect, incidental, or consequential losses arising from your use of the website or purchase of products. Nothing in these terms limits rights that cannot be excluded under applicable law.</p>
+          <h2 className="mt-8 text-2xl font-semibold">
+            7. Modifications to Terms
+          </h2>
+          <p>
+            We reserve the right to update, modify, or replace these Terms and
+            Conditions at any time without prior notice. Continued use of the
+            website after any changes constitutes acceptance of the revised
+            terms.
+          </p>
         </section>
 
         <section className="space-y-4">
-          <h2 className="mt-8 text-2xl font-semibold">9. Changes to These Terms</h2>
-          <p>We may update these Terms of Service from time to time. Changes take effect when posted on this page. Your continued use of our website after changes are posted means that you accept the updated terms.</p>
+          <h2 className="mt-8 text-2xl font-semibold">
+            8. Governing Law
+          </h2>
+          <p>
+            These Terms and Conditions are governed by and construed in
+            accordance with the laws of India.
+          </p>
         </section>
 
         <section className="space-y-4">
-          <h2 className="mt-8 text-2xl font-semibold">10. Contact Us</h2>
-          <p>If you have questions about these Terms of Service or your order, please contact us:</p>
+          <h2 className="mt-8 text-2xl font-semibold">
+            9. Contact Information
+          </h2>
           <div className="rounded-md bg-muted p-4">
-            <p><strong>Bmaa Fashion</strong></p>
-            <p>Email: <a href="mailto:support@bmaafashion.com">support@bmaafashion.com</a></p>
-            <p>Phone: +91-84388 9620</p>
-            <p>Address: 5/375, S. Kolathur, Indirapuri, Kovilambakkam, Chennai, Tamil Nadu 600129</p>
+            <p>
+              <strong>Email:</strong>{" "}
+              <a href="mailto:bmaafahion@gmail.com">
+                bmaafahion@gmail.com
+              </a>
+            </p>
+            <p>
+              <strong>Address:</strong> 62/75 karuku Main Road, Menambedu,
+              Ambattur, Chennai 600053
+            </p>
+            <p>
+              <strong>What's up:</strong>{" "}
+              <a href="https://wa.me/918438896206" target="_blank" rel="noopener noreferrer">
+                84388 96206
+              </a>
+            </p>
           </div>
         </section>
       </div>
